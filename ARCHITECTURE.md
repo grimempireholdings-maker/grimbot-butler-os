@@ -9,7 +9,7 @@ GrimBot Butler OS is organized as a modular robotics platform. The current relea
 - `perception/` is reserved for camera, sensor, and multimodal perception adapters.
 - `planner/` is reserved for higher-level task and behavior planning.
 - `safety/` is reserved for shared safety policies, hardware limits, and validation gates.
-- `skills/` is reserved for agentic tool use and household automation skills.
+- `skills/` is reserved for safe internal butler skills and future external tool integrations.
 - `voice/` is reserved for speech input and output.
 - `vision/` is reserved for webcam and computer vision pipelines.
 - `hardware/` is reserved for rover, actuator, motor, and sensor integrations.
@@ -128,3 +128,30 @@ v0.5 adds conversational voice as a push-to-talk I/O layer. It does not add alwa
 7. Machine output remains separate from speech text.
 
 Safety remains authoritative. Voice context can inform the conversation, but it cannot execute motion or override `safety.py`.
+
+## Current Skills Flow
+
+v0.6 adds a safe internal skills registry. Skills are Python modules with a fixed interface:
+
+- name
+- description
+- category
+- required_permission
+- inputs_schema
+- outputs_schema
+- can_execute()
+- execute()
+
+The registry can register skills, list skills, find skills by name/category, validate permission before execution, and return structured JSON results.
+
+Built-in v0.6 skills:
+
+- `room_cleanup_plan`
+- `checklist_builder`
+- `memory_review`
+- `maya_briefing`
+- `task_breakdown`
+
+Skills may read robot memory and compose Maya responses. They do not add motors, autonomous action, email, calendar, GitHub, external tools, or arbitrary filesystem writes.
+
+Skill responses keep `machine_output` separate from `maya_response`. Permission gates are enforced before skill execution. Safety remains authoritative if any skill output is later used as context for movement planning.

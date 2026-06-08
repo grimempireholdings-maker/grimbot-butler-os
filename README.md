@@ -13,7 +13,8 @@ Create a safe, affordable personal robotic assistant capable of perception, memo
 - [x] Long-Term Memory
 - [x] Maya Core
 - [x] Push-to-Talk Voice
-- [ ] Agentic Tool Use
+- [x] Safe Skills Registry
+- [ ] External Tool Use
 - [ ] Rover Platform
 - [ ] Object Manipulation
 - [ ] Household Assistance
@@ -30,6 +31,8 @@ Phase 2 adds GrimBot Robot Memory v0.3: structured SQLite memory for rooms, zone
 Phase 3 adds GrimBot Maya Core v0.4: assistant modes, permission logic, Maya-style response composition, cleanup coaching, and structured briefings.
 
 Phase 4 adds GrimBot Conversational Voice v0.5: push-to-talk speech-to-text, Maya response composition, robot memory retrieval, and mock text-to-speech output.
+
+Phase 5 adds GrimBot Skills Registry v0.6: safe internal butler skills with permission gates, Maya responses, and memory-backed planning.
 
 LLM output is never connected directly to motors. Every movement command must pass through `brain/grimbot_brain/safety.py`.
 
@@ -229,6 +232,44 @@ Voice conversation responses keep command and memory JSON separate from speech o
   }
 }
 ```
+
+## Skills Registry
+
+Skills are safe internal modules. v0.6 does not add motors, autonomous actions, email, calendar, GitHub, external tools, or arbitrary filesystem writes.
+
+Built-in skills:
+
+- `room_cleanup_plan`
+- `checklist_builder`
+- `memory_review`
+- `maya_briefing`
+- `task_breakdown`
+
+Skill endpoints:
+
+```text
+GET /skills
+GET /skills/{skill_name}
+POST /skills/{skill_name}/run
+```
+
+Skill results keep machine output separate from Maya text:
+
+```json
+{
+  "allowed": true,
+  "permission": "suggest",
+  "machine_output": {
+    "skill": "room_cleanup_plan",
+    "next_best_action": "clear hazard: loose cord on floor"
+  },
+  "maya_response": {
+    "user_response": "Boss, I can run the room cleanup planning skill. Permission level: suggest."
+  }
+}
+```
+
+Safety remains authoritative. Skills can plan and suggest, but they cannot execute movement.
 
 ## Test
 

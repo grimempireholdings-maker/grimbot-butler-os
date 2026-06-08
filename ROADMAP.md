@@ -27,17 +27,22 @@
 
 ## Phase 5
 
-- [ ] Agentic Butler OS Skills
+- [x] Safe Skills Registry
+- [x] Memory-Backed Cleanup Planning
 
 ## Phase 6
 
-- [ ] Rover Hardware
+- [ ] External Tool Use
 
 ## Phase 7
 
-- [ ] Manipulation
+- [ ] Rover Hardware
 
 ## Phase 8
+
+- [ ] Manipulation
+
+## Phase 9
 
 - [ ] Synth Platform
 

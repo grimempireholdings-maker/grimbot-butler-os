@@ -60,6 +60,8 @@ def _cleanup_coaching_text(request: MayaComposeRequest, permission: str) -> str:
 def _extract_summary(raw_output: dict) -> str:
     if "room_summary" in raw_output:
         return str(raw_output["room_summary"])
+    if isinstance(raw_output.get("data"), dict) and "room_summary" in raw_output["data"]:
+        return str(raw_output["data"]["room_summary"])
     if "next_best_action" in raw_output:
         return f"Next best action is {raw_output['next_best_action']}"
     if {"action", "reason"}.issubset(raw_output):
