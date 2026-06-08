@@ -11,16 +11,17 @@
 
 ## Phase 2
 
-- [ ] Voice Input
-- [ ] Voice Output
+- [x] Structured Robot Memory
+- [x] Room Memory Retrieval
 
 ## Phase 3
 
-- [ ] Long-Term Memory
+- [ ] Voice Input
+- [ ] Voice Output
 
 ## Phase 4
 
-- [ ] Butler OS
+- [ ] Agentic Butler OS Skills
 
 ## Phase 5
 
@@ -33,3 +34,7 @@
 ## Phase 7
 
 - [ ] Synth Platform
+
+## Later
+
+- [ ] Humanoid Platform

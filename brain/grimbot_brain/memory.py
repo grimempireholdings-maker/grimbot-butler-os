@@ -121,4 +121,147 @@ class BrainMemory:
                 )
                 """
             )
+            connection.execute(
+                """
+                CREATE TABLE IF NOT EXISTS rooms (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    name TEXT NOT NULL UNIQUE,
+                    display_name TEXT NOT NULL,
+                    count INTEGER NOT NULL DEFAULT 1,
+                    confidence REAL NOT NULL DEFAULT 0.7,
+                    importance REAL NOT NULL DEFAULT 0.5,
+                    first_seen TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                    last_seen TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+                )
+                """
+            )
+            connection.execute(
+                """
+                CREATE TABLE IF NOT EXISTS room_zones (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    room_id INTEGER NOT NULL,
+                    name TEXT NOT NULL,
+                    display_name TEXT NOT NULL,
+                    count INTEGER NOT NULL DEFAULT 1,
+                    confidence REAL NOT NULL DEFAULT 0.7,
+                    importance REAL NOT NULL DEFAULT 0.5,
+                    first_seen TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                    last_seen TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                    UNIQUE(room_id, name),
+                    FOREIGN KEY(room_id) REFERENCES rooms(id)
+                )
+                """
+            )
+            connection.execute(
+                """
+                CREATE TABLE IF NOT EXISTS known_objects (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    room_id INTEGER,
+                    zone_id INTEGER,
+                    name TEXT NOT NULL,
+                    display_name TEXT NOT NULL,
+                    count INTEGER NOT NULL DEFAULT 1,
+                    confidence REAL NOT NULL DEFAULT 0.7,
+                    importance REAL NOT NULL DEFAULT 0.5,
+                    first_seen TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                    last_seen TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                    UNIQUE(room_id, zone_id, name),
+                    FOREIGN KEY(room_id) REFERENCES rooms(id),
+                    FOREIGN KEY(zone_id) REFERENCES room_zones(id)
+                )
+                """
+            )
+            connection.execute(
+                """
+                CREATE TABLE IF NOT EXISTS hazards (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    room_id INTEGER,
+                    zone_id INTEGER,
+                    name TEXT NOT NULL,
+                    display_name TEXT NOT NULL,
+                    count INTEGER NOT NULL DEFAULT 1,
+                    confidence REAL NOT NULL DEFAULT 0.75,
+                    importance REAL NOT NULL DEFAULT 0.85,
+                    resolved INTEGER NOT NULL DEFAULT 0,
+                    first_seen TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                    last_seen TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                    UNIQUE(room_id, zone_id, name),
+                    FOREIGN KEY(room_id) REFERENCES rooms(id),
+                    FOREIGN KEY(zone_id) REFERENCES room_zones(id)
+                )
+                """
+            )
+            connection.execute(
+                """
+                CREATE TABLE IF NOT EXISTS mess_observations (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    room_id INTEGER,
+                    zone_id INTEGER,
+                    name TEXT NOT NULL,
+                    display_name TEXT NOT NULL,
+                    count INTEGER NOT NULL DEFAULT 1,
+                    confidence REAL NOT NULL DEFAULT 0.7,
+                    importance REAL NOT NULL DEFAULT 0.6,
+                    first_seen TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                    last_seen TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                    UNIQUE(room_id, zone_id, name),
+                    FOREIGN KEY(room_id) REFERENCES rooms(id),
+                    FOREIGN KEY(zone_id) REFERENCES room_zones(id)
+                )
+                """
+            )
+            connection.execute(
+                """
+                CREATE TABLE IF NOT EXISTS cleanup_tasks (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    room_id INTEGER,
+                    zone_id INTEGER,
+                    name TEXT NOT NULL,
+                    display_name TEXT NOT NULL,
+                    status TEXT NOT NULL DEFAULT 'open',
+                    count INTEGER NOT NULL DEFAULT 1,
+                    confidence REAL NOT NULL DEFAULT 0.7,
+                    importance REAL NOT NULL DEFAULT 0.65,
+                    first_seen TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                    last_seen TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                    UNIQUE(room_id, zone_id, name, status),
+                    FOREIGN KEY(room_id) REFERENCES rooms(id),
+                    FOREIGN KEY(zone_id) REFERENCES room_zones(id)
+                )
+                """
+            )
+            connection.execute(
+                """
+                CREATE TABLE IF NOT EXISTS episodic_memories (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    room_id INTEGER,
+                    zone_id INTEGER,
+                    kind TEXT NOT NULL,
+                    content TEXT NOT NULL,
+                    importance REAL NOT NULL DEFAULT 0.5,
+                    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                    FOREIGN KEY(room_id) REFERENCES rooms(id),
+                    FOREIGN KEY(zone_id) REFERENCES room_zones(id)
+                )
+                """
+            )
+            connection.execute(
+                """
+                CREATE TABLE IF NOT EXISTS semantic_facts (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    room_id INTEGER,
+                    zone_id INTEGER,
+                    fact_key TEXT NOT NULL,
+                    content TEXT NOT NULL,
+                    confidence REAL NOT NULL DEFAULT 0.7,
+                    importance REAL NOT NULL DEFAULT 0.5,
+                    count INTEGER NOT NULL DEFAULT 1,
+                    first_seen TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                    last_seen TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                    UNIQUE(room_id, zone_id, fact_key),
+                    FOREIGN KEY(room_id) REFERENCES rooms(id),
+                    FOREIGN KEY(zone_id) REFERENCES room_zones(id)
+                )
+                """
+            )
             connection.commit()

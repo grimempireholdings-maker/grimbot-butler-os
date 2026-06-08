@@ -5,12 +5,24 @@ from fastapi import FastAPI, Query
 
 from .cycle import execute_cycle
 from .memory import BrainMemory
+from .robot_memory import RobotMemory
 from .room_scan import run_room_scan
-from .schemas import BrainCycleInput, RobotCommand, RoomScanRequest, RoomScanResult
+from .schemas import (
+    BrainCycleInput,
+    MemoryRecord,
+    RelevantMemoryRequest,
+    RelevantMemoryResult,
+    RememberRequest,
+    RememberResponse,
+    RobotCommand,
+    RoomMemorySummary,
+    RoomScanRequest,
+    RoomScanResult,
+)
 
 load_dotenv()
 
-app = FastAPI(title="GrimBot Butler OS Brain", version="0.2.0")
+app = FastAPI(title="GrimBot Butler OS Brain", version="0.3.0")
 memory = BrainMemory()
 
 
@@ -37,3 +49,41 @@ def room_scan(request: RoomScanRequest) -> RoomScanResult:
 @app.get("/room-scans")
 def recent_room_scans(limit: int = Query(default=10, ge=1, le=100)) -> list[dict]:
     return memory.recent_room_scans(limit=limit)
+
+
+@app.post("/memory/remember", response_model=RememberResponse)
+def remember(request: RememberRequest) -> dict:
+    return RobotMemory(memory).remember(request)
+
+
+@app.get("/memory/rooms", response_model=list[MemoryRecord])
+def memory_rooms() -> list[MemoryRecord]:
+    return RobotMemory(memory).list_rooms()
+
+
+@app.get("/memory/rooms/{room_name}", response_model=RoomMemorySummary)
+def memory_room(room_name: str) -> RoomMemorySummary:
+    return RobotMemory(memory).room_summary(room_name)
+
+
+@app.get("/memory/hazards", response_model=list[MemoryRecord])
+def memory_hazards(
+    room_name: str | None = None,
+    zone_name: str | None = None,
+    limit: int = Query(default=20, ge=1, le=100),
+) -> list[MemoryRecord]:
+    return RobotMemory(memory).hazards(room_name, zone_name, limit)
+
+
+@app.get("/memory/mess-zones", response_model=list[MemoryRecord])
+def memory_mess_zones(
+    room_name: str | None = None,
+    zone_name: str | None = None,
+    limit: int = Query(default=20, ge=1, le=100),
+) -> list[MemoryRecord]:
+    return RobotMemory(memory).mess_zones(room_name, zone_name, limit)
+
+
+@app.post("/memory/relevant", response_model=RelevantMemoryResult)
+def memory_relevant(request: RelevantMemoryRequest) -> RelevantMemoryResult:
+    return RobotMemory(memory).relevant(request)

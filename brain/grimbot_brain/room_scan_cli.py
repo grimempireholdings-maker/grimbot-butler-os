@@ -15,10 +15,14 @@ def main() -> None:
     parser.add_argument("--mock-camera-frame", default=None)
     parser.add_argument("--capture-webcam", action="store_true")
     parser.add_argument("--camera-index", type=int, default=0)
+    parser.add_argument("--room-name", default=None)
+    parser.add_argument("--zone-name", default=None)
     args = parser.parse_args()
 
     os.environ.setdefault("GRIMBOT_MOCK_PERCEPTION", "true")
     request = RoomScanRequest(
+        room_name=args.room_name,
+        zone_name=args.zone_name,
         image_path=args.image_path,
         mock_camera_frame=args.mock_camera_frame,
         capture_webcam=args.capture_webcam,

@@ -7,6 +7,7 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 RobotAction = Literal["stop", "move_forward", "turn_left", "turn_right", "reverse", "idle"]
 VisionMode = Literal["mock", "gemini"]
+MemoryKind = Literal["observation", "preference", "instruction", "fact"]
 
 
 class IMUReading(BaseModel):
@@ -65,6 +66,8 @@ class RobotCommand(BaseModel):
 class RoomScanRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
+    room_name: str | None = Field(default=None, max_length=120)
+    zone_name: str | None = Field(default=None, max_length=120)
     image_path: str | None = Field(default=None, max_length=500)
     mock_camera_frame: str | None = Field(default=None, max_length=2000)
     capture_webcam: bool = False
@@ -93,3 +96,69 @@ class RoomScanResult(BaseModel):
                 continue
             cleaned.append(item[:120])
         return cleaned
+
+
+class RememberRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    text: str = Field(min_length=1, max_length=2000)
+    room_name: str | None = Field(default=None, max_length=120)
+    zone_name: str | None = Field(default=None, max_length=120)
+    importance: float = Field(default=0.5, ge=0, le=1)
+    kind: MemoryKind = "observation"
+
+
+class RelevantMemoryRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    query: str = Field(min_length=1, max_length=500)
+    room_name: str | None = Field(default=None, max_length=120)
+    zone_name: str | None = Field(default=None, max_length=120)
+    limit: int = Field(default=10, ge=1, le=50)
+
+
+class MemoryRecord(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    id: int = Field(ge=1)
+    name: str = Field(min_length=1, max_length=120)
+    room_name: str | None = Field(default=None, max_length=120)
+    zone_name: str | None = Field(default=None, max_length=120)
+    count: int = Field(default=1, ge=1)
+    confidence: float = Field(ge=0, le=1)
+    importance: float = Field(ge=0, le=1)
+    first_seen: str
+    last_seen: str
+
+
+class RoomMemorySummary(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    room_name: str = Field(min_length=1, max_length=120)
+    zones: list[MemoryRecord] = Field(default_factory=list)
+    known_objects: list[MemoryRecord] = Field(default_factory=list)
+    hazards: list[MemoryRecord] = Field(default_factory=list)
+    mess_zones: list[MemoryRecord] = Field(default_factory=list)
+    cleanup_tasks: list[MemoryRecord] = Field(default_factory=list)
+    episodic_memories: list[dict] = Field(default_factory=list)
+    semantic_facts: list[dict] = Field(default_factory=list)
+    recommended_first_cleanup_action: str = Field(min_length=1, max_length=500)
+
+
+class RelevantMemoryResult(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    query: str = Field(min_length=1, max_length=500)
+    room_name: str | None = Field(default=None, max_length=120)
+    hazards: list[MemoryRecord] = Field(default_factory=list)
+    mess_zones: list[MemoryRecord] = Field(default_factory=list)
+    cleanup_tasks: list[MemoryRecord] = Field(default_factory=list)
+    semantic_facts: list[dict] = Field(default_factory=list)
+    next_best_action: str = Field(min_length=1, max_length=500)
+
+
+class RememberResponse(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    episodic_memory_id: int
+    semantic_fact: dict

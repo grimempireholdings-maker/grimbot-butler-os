@@ -5,7 +5,7 @@ GrimBot Butler OS is organized as a modular robotics platform. The current relea
 ## Modules
 
 - `brain/` contains the runnable FastAPI brain server and CLI demo.
-- `memory/` is reserved for long-term memory systems and retrieval.
+- `memory/` stores SQLite robot memory and local runtime databases.
 - `perception/` is reserved for camera, sensor, and multimodal perception adapters.
 - `planner/` is reserved for higher-level task and behavior planning.
 - `safety/` is reserved for shared safety policies, hardware limits, and validation gates.
@@ -58,3 +58,29 @@ Room scan output is also structured JSON:
 4. Run Gemini room scanning only for approved image files when mock mode is disabled and an API key is present.
 5. Fall back to mock room scanning without API keys or webcam hardware.
 6. Store the structured room scan result in SQLite.
+7. Extract visible objects, hazards, mess zones, and cleanup tasks into robot memory.
+
+## Current Robot Memory Flow
+
+SQLite remains the source of truth. v0.3 adds structured tables for:
+
+- rooms
+- room_zones
+- known_objects
+- hazards
+- mess_observations
+- cleanup_tasks
+- episodic_memories
+- semantic_facts
+
+Memory writes use normalized room, zone, and item keys. Repeated observations update count, confidence, importance, and last-seen timestamps instead of creating endless duplicates.
+
+Robot memory supports:
+
+- remembering a user-provided fact or observation
+- recalling what is known about a room
+- listing hazards by room or zone
+- listing recurring mess zones by room or zone
+- returning relevant cleanup context and the next best cleanup action
+
+Memory may provide planning context, but safety remains authoritative. A remembered fact that a hallway is usually clear cannot override a live obstacle stop from `safety.py`.

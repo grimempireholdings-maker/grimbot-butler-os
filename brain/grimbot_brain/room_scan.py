@@ -8,6 +8,7 @@ from typing import Any
 from pydantic import ValidationError
 
 from .memory import BrainMemory
+from .robot_memory import RobotMemory
 from .schemas import RoomScanRequest, RoomScanResult
 from .vision import approved_image_path, capture_webcam_frame
 
@@ -23,6 +24,7 @@ def run_room_scan(request: RoomScanRequest, memory: BrainMemory) -> RoomScanResu
         result = _gemini_room_scan(image_path, api_key)
 
     memory.log_room_scan(result)
+    RobotMemory(memory).ingest_room_scan(result, room_name=request.room_name, zone_name=request.zone_name)
     return result
 
 
@@ -48,6 +50,12 @@ def _mock_room_scan(request: RoomScanRequest, image_path: Path | None) -> RoomSc
     if "cord" in frame_text or "cable" in frame_text:
         visible_objects.append("cord")
         hazards.append("loose cord on floor")
+    if "notebook" in frame_text:
+        visible_objects.append("notebook")
+        mess_zones.append("notebooks on desk")
+    if "drink" in frame_text or "cup" in frame_text or "container" in frame_text:
+        visible_objects.append("drink container")
+        mess_zones.append("drink containers on surface")
     if "spill" in frame_text:
         hazards.append("possible liquid spill")
         mess_zones.append("spill area")

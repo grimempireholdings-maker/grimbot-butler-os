@@ -10,8 +10,8 @@ Create a safe, affordable personal robotic assistant capable of perception, memo
 
 - [x] Brain Simulation
 - [x] Vision
+- [x] Long-Term Memory
 - [ ] Voice
-- [ ] Long-Term Memory
 - [ ] Agentic Tool Use
 - [ ] Rover Platform
 - [ ] Object Manipulation
@@ -23,6 +23,8 @@ Create a safe, affordable personal robotic assistant capable of perception, memo
 Phase 0 includes a runnable Python/FastAPI robot brain simulator. It accepts sensor input, runs mock or Gemini-backed perception, creates planner intent, validates all movement through a safety layer, and logs cycles to SQLite.
 
 Phase 1 adds GrimBot Vision v0.2: safe local webcam frame capture, approved-image validation, and Gemini or mock room scans that return structured JSON.
+
+Phase 2 adds GrimBot Robot Memory v0.3: structured SQLite memory for rooms, zones, known objects, hazards, mess observations, cleanup tasks, episodic memories, and semantic facts.
 
 LLM output is never connected directly to motors. Every movement command must pass through `brain/grimbot_brain/safety.py`.
 
@@ -100,6 +102,42 @@ Room scan output is structured JSON with:
   "image_path": null
 }
 ```
+
+## Robot Memory
+
+Room scans automatically update structured robot memory:
+
+- visible objects become known objects
+- mess zones become recurring mess observations
+- hazards update hazard counts and confidence
+- suggested cleanup order becomes cleanup task memory
+
+Memory endpoints:
+
+```text
+POST /memory/remember
+GET /memory/rooms
+GET /memory/rooms/{room_name}
+GET /memory/hazards
+GET /memory/mess-zones
+POST /memory/relevant
+```
+
+Example recall shape:
+
+```json
+{
+  "query": "what should I clean first?",
+  "room_name": "Office",
+  "hazards": [{"name": "loose cord on floor", "count": 2}],
+  "mess_zones": [{"name": "notebooks on desk"}],
+  "cleanup_tasks": [{"name": "loose cord on floor"}],
+  "semantic_facts": [],
+  "next_best_action": "clear hazard: loose cord on floor"
+}
+```
+
+Memory can inform planning context later, but it never overrides `safety.py`.
 
 ## Test
 
