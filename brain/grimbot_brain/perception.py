@@ -1,12 +1,9 @@
 from __future__ import annotations
 
 import os
-from pathlib import Path
 
 from .schemas import BrainCycleInput, PerceptionResult
-
-ALLOWED_IMAGE_EXTENSIONS = {".jpg", ".jpeg", ".png", ".webp"}
-MAX_IMAGE_BYTES = 10 * 1024 * 1024
+from .vision import approved_image_path
 
 
 def perceive(cycle_input: BrainCycleInput) -> PerceptionResult:
@@ -55,7 +52,7 @@ def _gemini_perception(cycle_input: BrainCycleInput, api_key: str) -> Perception
         f"mock camera frame: {cycle_input.mock_camera_frame or 'none'}; "
         f"distance_cm: {cycle_input.distance_cm}."
     )
-    image_path = _safe_image_path(cycle_input.image_path)
+    image_path = approved_image_path(cycle_input.image_path)
     if image_path:
         uploaded_image = genai.upload_file(str(image_path))
         response = model.generate_content([prompt, uploaded_image])
@@ -71,20 +68,3 @@ def _gemini_perception(cycle_input: BrainCycleInput, api_key: str) -> Perception
         obstacle_distance_cm=cycle_input.distance_cm if obstacle_detected else None,
         confidence=0.8,
     )
-
-
-def _safe_image_path(image_path: str | None) -> Path | None:
-    if not image_path:
-        return None
-
-    path = Path(image_path).expanduser()
-    if not path.exists() or not path.is_file():
-        return None
-
-    if path.suffix.lower() not in ALLOWED_IMAGE_EXTENSIONS:
-        return None
-
-    if path.stat().st_size > MAX_IMAGE_BYTES:
-        return None
-
-    return path

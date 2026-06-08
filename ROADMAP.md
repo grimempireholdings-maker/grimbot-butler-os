@@ -6,8 +6,8 @@
 
 ## Phase 1
 
-- [ ] Gemini Vision
-- [ ] Webcam Integration
+- [x] Gemini Vision
+- [x] Webcam Integration
 
 ## Phase 2
 

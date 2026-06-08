@@ -6,6 +6,7 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 
 RobotAction = Literal["stop", "move_forward", "turn_left", "turn_right", "reverse", "idle"]
+VisionMode = Literal["mock", "gemini"]
 
 
 class IMUReading(BaseModel):
@@ -59,3 +60,36 @@ class RobotCommand(BaseModel):
     action: RobotAction
     speed: float = Field(ge=0, le=1)
     reason: str = Field(min_length=1, max_length=500)
+
+
+class RoomScanRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    image_path: str | None = Field(default=None, max_length=500)
+    mock_camera_frame: str | None = Field(default=None, max_length=2000)
+    capture_webcam: bool = False
+    camera_index: int = Field(default=0, ge=0, le=10)
+
+
+class RoomScanResult(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    room_summary: str = Field(min_length=1, max_length=2000)
+    visible_objects: list[str] = Field(default_factory=list, max_length=50)
+    mess_zones: list[str] = Field(default_factory=list, max_length=20)
+    hazards: list[str] = Field(default_factory=list, max_length=20)
+    suggested_cleanup_order: list[str] = Field(default_factory=list, max_length=20)
+    next_best_action: str = Field(min_length=1, max_length=500)
+    mode: VisionMode = "mock"
+    image_path: str | None = Field(default=None, max_length=500)
+
+    @field_validator("visible_objects", "mess_zones", "hazards", "suggested_cleanup_order")
+    @classmethod
+    def bound_list_items(cls, values: list[str]) -> list[str]:
+        cleaned = []
+        for value in values:
+            item = value.strip()
+            if not item:
+                continue
+            cleaned.append(item[:120])
+        return cleaned

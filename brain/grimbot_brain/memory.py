@@ -5,7 +5,7 @@ import os
 import sqlite3
 from pathlib import Path
 
-from .schemas import BrainCycleInput, PerceptionResult, RobotCommand, RobotIntent
+from .schemas import BrainCycleInput, PerceptionResult, RobotCommand, RobotIntent, RoomScanResult
 
 
 class BrainMemory:
@@ -62,6 +62,41 @@ class BrainMemory:
             for row in rows
         ]
 
+    def log_room_scan(self, scan: RoomScanResult) -> int:
+        with sqlite3.connect(self.db_path) as connection:
+            cursor = connection.execute(
+                """
+                INSERT INTO room_scans (scan_result)
+                VALUES (?)
+                """,
+                (scan.model_dump_json(),),
+            )
+            connection.commit()
+            return int(cursor.lastrowid)
+
+    def recent_room_scans(self, limit: int = 10) -> list[dict]:
+        safe_limit = max(1, min(limit, 100))
+        with sqlite3.connect(self.db_path) as connection:
+            connection.row_factory = sqlite3.Row
+            rows = connection.execute(
+                """
+                SELECT id, created_at, scan_result
+                FROM room_scans
+                ORDER BY id DESC
+                LIMIT ?
+                """,
+                (safe_limit,),
+            ).fetchall()
+
+        return [
+            {
+                "id": row["id"],
+                "created_at": row["created_at"],
+                "scan_result": json.loads(row["scan_result"]),
+            }
+            for row in rows
+        ]
+
     def _initialize(self) -> None:
         self.db_path.parent.mkdir(parents=True, exist_ok=True)
         with sqlite3.connect(self.db_path) as connection:
@@ -74,6 +109,15 @@ class BrainMemory:
                     perception TEXT NOT NULL,
                     intent TEXT NOT NULL,
                     command TEXT NOT NULL
+                )
+                """
+            )
+            connection.execute(
+                """
+                CREATE TABLE IF NOT EXISTS room_scans (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                    scan_result TEXT NOT NULL
                 )
                 """
             )

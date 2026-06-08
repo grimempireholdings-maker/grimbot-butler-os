@@ -26,6 +26,21 @@ The current command contract is strict JSON:
 {"action":"stop","speed":0,"reason":"Obstacle too close"}
 ```
 
+Room scan output is also structured JSON:
+
+```json
+{
+  "room_summary": "Short summary",
+  "visible_objects": ["floor"],
+  "mess_zones": ["general surfaces"],
+  "hazards": [],
+  "suggested_cleanup_order": ["general surfaces"],
+  "next_best_action": "general surfaces",
+  "mode": "mock",
+  "image_path": null
+}
+```
+
 ## Current Brain Cycle
 
 1. Accept image path or mock camera frame, IMU readings, battery percentage, distance sensor reading, and user command.
@@ -34,3 +49,12 @@ The current command contract is strict JSON:
 4. Validate intent through safety rules.
 5. Log the full cycle to SQLite.
 6. Return only the final safe command.
+
+## Current Room Scan Flow
+
+1. Accept either a webcam capture request, an approved local image path, or mock camera text.
+2. Save webcam frames only into the configured safe image directory, `vision/images` by default.
+3. Reject arbitrary image paths outside the safe image directory.
+4. Run Gemini room scanning only for approved image files when mock mode is disabled and an API key is present.
+5. Fall back to mock room scanning without API keys or webcam hardware.
+6. Store the structured room scan result in SQLite.
