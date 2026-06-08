@@ -1,8 +1,10 @@
 from __future__ import annotations
 
+import math
 from abc import ABC, abstractmethod
 from typing import Any
 
+from .adaptive_state import AdaptiveState
 from .maya_core import build_maya_briefing
 from .memory import BrainMemory
 from .persona import resolve_permission
@@ -55,22 +57,28 @@ class Skill(ABC):
 
 
 class SkillRegistry:
-    def __init__(self, memory: BrainMemory) -> None:
+    def __init__(self, memory: BrainMemory, adaptive_state: AdaptiveState | None = None) -> None:
         self.memory = memory
+        self.adaptive_state = adaptive_state
         self._skills: dict[str, Skill] = {}
 
     def register(self, skill: Skill) -> None:
         self._skills[_normalize_skill_name(skill.name)] = skill
 
     def list_skills(self) -> list[SkillInfo]:
-        return [skill.info() for skill in sorted(self._skills.values(), key=lambda item: item.name)]
+        skill_names = [skill.name for skill in self._skills.values()]
+        if self.adaptive_state:
+            skill_names = self.adaptive_state.rank_skill_names(skill_names)
+        else:
+            skill_names = sorted(skill_names)
+        return [self._skills[_normalize_skill_name(name)].info() for name in skill_names]
 
     def get(self, name: str) -> Skill | None:
         return self._skills.get(_normalize_skill_name(name))
 
     def find_by_category(self, category: str) -> list[SkillInfo]:
         normalized = category.strip().lower()
-        return [skill.info() for skill in self._skills.values() if skill.category == normalized]
+        return [skill for skill in self.list_skills() if skill.category == normalized]
 
     def run(self, name: str, request: SkillRunRequest) -> SkillRunResult:
         skill = self.get(name)
@@ -79,8 +87,17 @@ class SkillRegistry:
 
         effective_permission = resolve_permission(request.assistant_mode, request.permission, request.verified)
         allowed = skill.can_execute(effective_permission)
+        state_values = self.adaptive_state.values() if self.adaptive_state and request.include_state else None
         if allowed:
-            machine_output = _structured_output(skill.name, skill.execute(request.inputs, self.memory))
+            inputs = dict(request.inputs)
+            if state_values is not None:
+                inputs.setdefault("adaptive_state", state_values)
+            machine_output = _structured_output(skill.name, skill.execute(inputs, self.memory))
+            if state_values is not None:
+                machine_output["data"]["adaptive_state"] = state_values
+                machine_output["data"]["state_next_best_action"] = self.adaptive_state.snapshot().next_best_action
+                if skill.name == "room_cleanup_plan" and _state_value(state_values, "urgency") >= 0.65:
+                    machine_output["next_best_action"] = f"{machine_output['next_best_action']} with concise safety priority"
         else:
             machine_output = SkillMachineOutput(
                 skill=skill.name,
@@ -99,6 +116,7 @@ class SkillRegistry:
                 verified=request.verified,
                 requested_permission=effective_permission,
                 user_goal=f"run skill {skill.name}",
+                adaptive_state=state_values,
             )
         )
         return SkillRunResult(
@@ -122,12 +140,14 @@ class RoomCleanupPlanSkill(Skill):
         robot_memory = RobotMemory(memory)
         room_name = _optional_text(inputs.get("room_name"))
         zone_name = _optional_text(inputs.get("zone_name"))
+        state_values = _optional_state(inputs.get("adaptive_state"))
         relevant = robot_memory.relevant(
             RelevantMemoryRequest(
                 query="room cleanup plan",
                 room_name=room_name,
                 zone_name=zone_name,
                 limit=10,
+                adaptive_state=state_values,
             )
         )
         plan = [f"Clear hazard: {item.name}" for item in relevant.hazards]
@@ -180,8 +200,15 @@ class MemoryReviewSkill(Skill):
         room_name = _optional_text(inputs.get("room_name"))
         zone_name = _optional_text(inputs.get("zone_name"))
         query = _text(inputs.get("query"), "memory review")
+        state_values = _optional_state(inputs.get("adaptive_state"))
         relevant = RobotMemory(memory).relevant(
-            RelevantMemoryRequest(query=query, room_name=room_name, zone_name=zone_name, limit=10)
+            RelevantMemoryRequest(
+                query=query,
+                room_name=room_name,
+                zone_name=zone_name,
+                limit=10,
+                adaptive_state=state_values,
+            )
         )
         return {
             "summary": f"Found {len(relevant.hazards)} hazards and {len(relevant.mess_zones)} mess zones.",
@@ -231,8 +258,8 @@ class TaskBreakdownSkill(Skill):
         return {"task": task, "steps": steps, "next_best_action": steps[0]}
 
 
-def create_default_registry(memory: BrainMemory) -> SkillRegistry:
-    registry = SkillRegistry(memory)
+def create_default_registry(memory: BrainMemory, adaptive_state: AdaptiveState | None = None) -> SkillRegistry:
+    registry = SkillRegistry(memory, adaptive_state)
     registry.register(RoomCleanupPlanSkill())
     registry.register(ChecklistBuilderSkill())
     registry.register(MemoryReviewSkill())
@@ -264,3 +291,28 @@ def _structured_output(skill_name: str, payload: dict[str, Any]) -> dict[str, An
         next_best_action=next_best_action,
         data=data,
     ).model_dump()
+
+
+def _optional_state(value: Any) -> dict[str, float] | None:
+    if not isinstance(value, dict):
+        return None
+    state: dict[str, float] = {}
+    for key, item in value.items():
+        try:
+            number = float(item)
+        except (TypeError, ValueError):
+            continue
+        if not math.isfinite(number):
+            continue
+        state[str(key)] = max(0.0, min(1.0, number))
+    return state or None
+
+
+def _state_value(values: dict[str, float], key: str) -> float:
+    try:
+        value = float(values.get(key, 0.0))
+    except (TypeError, ValueError):
+        return 0.0
+    if not math.isfinite(value):
+        return 0.0
+    return max(0.0, min(1.0, value))

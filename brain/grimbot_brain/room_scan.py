@@ -7,9 +7,10 @@ from typing import Any
 
 from pydantic import ValidationError
 
+from .adaptive_state import AdaptiveState
 from .memory import BrainMemory
 from .robot_memory import RobotMemory
-from .schemas import RoomScanRequest, RoomScanResult
+from .schemas import RoomScanRequest, RoomScanResult, StateEventRequest
 from .vision import approved_image_path, capture_webcam_frame
 
 
@@ -24,7 +25,33 @@ def run_room_scan(request: RoomScanRequest, memory: BrainMemory) -> RoomScanResu
         result = _gemini_room_scan(image_path, api_key)
 
     memory.log_room_scan(result)
-    RobotMemory(memory).ingest_room_scan(result, room_name=request.room_name, zone_name=request.zone_name)
+    robot_memory = RobotMemory(memory)
+    robot_memory.ingest_room_scan(result, room_name=request.room_name, zone_name=request.zone_name)
+    adaptive_state = AdaptiveState(memory)
+    adaptive_state.apply_event(
+        StateEventRequest(
+            event_type="room_scan_observation",
+            room_name=request.room_name,
+            zone_name=request.zone_name,
+            reason="room scan observation updated adaptive state",
+            metadata={
+                "hazard_count": len(result.hazards),
+                "mess_count": len(result.mess_zones),
+                "object_count": len(result.visible_objects),
+            },
+        )
+    )
+    repeated_hazard_count = max((hazard.count for hazard in robot_memory.hazards(request.room_name, request.zone_name)), default=0)
+    if repeated_hazard_count > 1:
+        adaptive_state.apply_event(
+            StateEventRequest(
+                event_type="memory_frequency",
+                room_name=request.room_name,
+                zone_name=request.zone_name,
+                reason="recurring room memory increased adaptive attention",
+                metadata={"count": repeated_hazard_count, "hazard_count": repeated_hazard_count},
+            )
+        )
     return result
 
 

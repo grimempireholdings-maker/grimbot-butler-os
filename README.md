@@ -14,6 +14,7 @@ Create a safe, affordable personal robotic assistant capable of perception, memo
 - [x] Maya Core
 - [x] Push-to-Talk Voice
 - [x] Safe Skills Registry
+- [x] Adaptive State Engine
 - [ ] External Tool Use
 - [ ] Rover Platform
 - [ ] Object Manipulation
@@ -33,6 +34,8 @@ Phase 3 adds GrimBot Maya Core v0.4: assistant modes, permission logic, Maya-sty
 Phase 4 adds GrimBot Conversational Voice v0.5: push-to-talk speech-to-text, Maya response composition, robot memory retrieval, and mock text-to-speech output.
 
 Phase 5 adds GrimBot Skills Registry v0.6: safe internal butler skills with permission gates, Maya responses, and memory-backed planning.
+
+Phase 6 adds GrimBot Adaptive State v0.7: SQLite-backed state signals that influence attention, memory priority, skill suggestion, and Maya response style without adding emotions, consciousness, ML training, motors, or autonomous execution.
 
 LLM output is never connected directly to motors. Every movement command must pass through `brain/grimbot_brain/safety.py`.
 
@@ -235,7 +238,7 @@ Voice conversation responses keep command and memory JSON separate from speech o
 
 ## Skills Registry
 
-Skills are safe internal modules. v0.6 does not add motors, autonomous actions, email, calendar, GitHub, external tools, or arbitrary filesystem writes.
+Skills are safe internal modules. v0.6 and v0.7 do not add motors, autonomous actions, email, calendar, GitHub, external tools, or arbitrary filesystem writes.
 
 Built-in skills:
 
@@ -266,6 +269,39 @@ Skill results keep machine output separate from Maya text:
   "maya_response": {
     "user_response": "Boss, I can run the room cleanup planning skill. Permission level: suggest."
   }
+}
+```
+
+## Adaptive State
+
+Adaptive state is a lightweight state-weighting system, not emotions, consciousness, or machine learning. It tracks bounded SQLite-backed signals:
+
+- `attention`
+- `urgency`
+- `novelty`
+- `confidence`
+- `reward`
+- `friction`
+- `fatigue`
+- `curiosity`
+
+State endpoints:
+
+```text
+GET /state
+POST /state/event
+POST /state/decay
+POST /state/reset
+```
+
+Room scans and memory frequency can update state. State can influence Maya response style and skill suggestion ranking, but it never overrides `safety.py`, executes skills directly, controls motors, or bypasses permission gates.
+
+Example state-informed response:
+
+```json
+{
+  "machine_output": {"next_best_action": "clear hazard: loose cord on floor"},
+  "user_response": "Not verified yet. First: Urgency is elevated, so I will keep this concise. clear hazard: loose cord on floor. Then reassess."
 }
 ```
 

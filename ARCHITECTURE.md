@@ -155,3 +155,39 @@ Built-in v0.6 skills:
 Skills may read robot memory and compose Maya responses. They do not add motors, autonomous action, email, calendar, GitHub, external tools, or arbitrary filesystem writes.
 
 Skill responses keep `machine_output` separate from `maya_response`. Permission gates are enforced before skill execution. Safety remains authoritative if any skill output is later used as context for movement planning.
+
+## Current Adaptive State Flow
+
+v0.7 adds a lightweight adaptive state system inspired by pheromone-style pressure signals. It is not emotions, consciousness, or machine learning. SQLite remains the source of truth.
+
+Tracked signals:
+
+- attention
+- urgency
+- novelty
+- confidence
+- reward
+- friction
+- fatigue
+- curiosity
+
+Each signal stores its current value, min/max bounds, baseline, decay rate, last update time, source, and reason. Event updates are bounded between 0 and 1. Decay drifts values back toward baseline over time.
+
+State events include:
+
+- repeated hazards raising urgency and attention
+- successful cleanup raising reward and confidence
+- ignored recommendations raising friction
+- new rooms or objects raising novelty and curiosity
+- low battery or unsafe sensors raising fatigue and urgency
+
+Adaptive state can influence Maya response style, skill suggestion ranking, memory relevance pressure, and `next_best_action` wording. It cannot execute skills, bypass permission gates, control motors, or override `safety.py`.
+
+State endpoints:
+
+```text
+GET /state
+POST /state/event
+POST /state/decay
+POST /state/reset
+```

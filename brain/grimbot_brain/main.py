@@ -3,6 +3,7 @@ from __future__ import annotations
 from dotenv import load_dotenv
 from fastapi import FastAPI, HTTPException, Query
 
+from .adaptive_state import AdaptiveState
 from .conversation import run_voice_conversation
 from .cycle import execute_cycle
 from .maya_core import build_maya_briefing
@@ -29,13 +30,18 @@ from .schemas import (
     SkillInfo,
     SkillRunRequest,
     SkillRunResult,
+    StateDecayRequest,
+    StateEventRequest,
+    StateEventResponse,
+    StateResetRequest,
+    StateSnapshot,
     VoiceConversationRequest,
     VoiceConversationResponse,
 )
 
 load_dotenv()
 
-app = FastAPI(title="GrimBot Butler OS Brain", version="0.6.0")
+app = FastAPI(title="GrimBot Butler OS Brain", version="0.7.0")
 memory = BrainMemory()
 
 
@@ -99,11 +105,15 @@ def memory_mess_zones(
 
 @app.post("/memory/relevant", response_model=RelevantMemoryResult)
 def memory_relevant(request: RelevantMemoryRequest) -> RelevantMemoryResult:
+    if request.adaptive_state is None:
+        request = request.model_copy(update={"adaptive_state": AdaptiveState(memory).values()})
     return RobotMemory(memory).relevant(request)
 
 
 @app.post("/maya/compose", response_model=MayaComposedResponse)
 def maya_compose(request: MayaComposeRequest) -> MayaComposedResponse:
+    if request.adaptive_state is None:
+        request = request.model_copy(update={"adaptive_state": AdaptiveState(memory).values()})
     return compose_maya_response(request)
 
 
@@ -122,7 +132,7 @@ def voice_conversation(request: VoiceConversationRequest) -> VoiceConversationRe
 
 @app.get("/skills", response_model=list[SkillInfo])
 def skills_list(category: str | None = None) -> list[SkillInfo]:
-    registry = create_default_registry(memory)
+    registry = create_default_registry(memory, AdaptiveState(memory))
     if category:
         return registry.find_by_category(category)
     return registry.list_skills()
@@ -130,7 +140,7 @@ def skills_list(category: str | None = None) -> list[SkillInfo]:
 
 @app.get("/skills/{skill_name}", response_model=SkillInfo)
 def skills_get(skill_name: str) -> SkillInfo:
-    skill = create_default_registry(memory).get(skill_name)
+    skill = create_default_registry(memory, AdaptiveState(memory)).get(skill_name)
     if not skill:
         raise HTTPException(status_code=404, detail=f"Unknown skill: {skill_name}")
     return skill.info()
@@ -139,6 +149,26 @@ def skills_get(skill_name: str) -> SkillInfo:
 @app.post("/skills/{skill_name}/run", response_model=SkillRunResult)
 def skills_run(skill_name: str, request: SkillRunRequest) -> SkillRunResult:
     try:
-        return create_default_registry(memory).run(skill_name, request)
+        return create_default_registry(memory, AdaptiveState(memory)).run(skill_name, request)
     except KeyError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+
+@app.get("/state", response_model=StateSnapshot)
+def state_get() -> StateSnapshot:
+    return AdaptiveState(memory).snapshot()
+
+
+@app.post("/state/event", response_model=StateEventResponse)
+def state_event(request: StateEventRequest) -> StateEventResponse:
+    return AdaptiveState(memory).apply_event(request)
+
+
+@app.post("/state/decay", response_model=StateSnapshot)
+def state_decay(request: StateDecayRequest) -> StateSnapshot:
+    return AdaptiveState(memory).decay(request)
+
+
+@app.post("/state/reset", response_model=StateSnapshot)
+def state_reset(request: StateResetRequest) -> StateSnapshot:
+    return AdaptiveState(memory).reset(request.reason)
