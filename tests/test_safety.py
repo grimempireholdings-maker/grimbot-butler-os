@@ -48,6 +48,36 @@ def test_unstable_imu_forces_stop() -> None:
     assert command.reason == "IMU reports unsafe tilt or acceleration"
 
 
+def test_unsafe_vertical_acceleration_forces_stop() -> None:
+    cycle_input = BrainCycleInput(
+        imu=IMUReading(accel_z=2),
+        battery_percentage=80,
+        distance_cm=100,
+        user_command="move forward",
+    )
+    intent = RobotIntent(requested_action="move_forward", requested_speed=0.25, reason="test")
+
+    command = validate_action(cycle_input, intent)
+
+    assert command.action == "stop"
+    assert command.reason == "IMU reports unsafe tilt or acceleration"
+
+
+def test_fast_rotation_forces_stop() -> None:
+    cycle_input = BrainCycleInput(
+        imu=IMUReading(gyro_z=240),
+        battery_percentage=80,
+        distance_cm=100,
+        user_command="move forward",
+    )
+    intent = RobotIntent(requested_action="move_forward", requested_speed=0.25, reason="test")
+
+    command = validate_action(cycle_input, intent)
+
+    assert command.action == "stop"
+    assert command.reason == "IMU reports unsafe tilt or acceleration"
+
+
 def test_speed_is_clamped() -> None:
     cycle_input = BrainCycleInput(
         battery_percentage=80,

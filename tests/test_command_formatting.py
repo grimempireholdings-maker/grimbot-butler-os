@@ -1,6 +1,7 @@
 import json
 
-from grimbot_brain.main import run_cycle
+from grimbot_brain import main
+from grimbot_brain.memory import BrainMemory
 from grimbot_brain.schemas import BrainCycleInput
 from grimbot_brain.schemas import RobotCommand
 
@@ -12,8 +13,10 @@ def test_robot_command_serializes_to_strict_json_shape() -> None:
     assert payload == {"action": "stop", "speed": 0.0, "reason": "Obstacle too close"}
 
 
-def test_cycle_returns_command_only() -> None:
-    command = run_cycle(
+def test_cycle_returns_command_only(tmp_path, monkeypatch) -> None:
+    monkeypatch.setattr(main, "memory", BrainMemory(tmp_path / "cycles.sqlite3"))
+
+    command = main.run_cycle(
         BrainCycleInput(
             image_path="mock.jpg",
             mock_camera_frame="wall very close",

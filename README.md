@@ -24,6 +24,8 @@ Phase 0 includes a runnable Python/FastAPI robot brain simulator. It accepts sen
 
 LLM output is never connected directly to motors. Every movement command must pass through `brain/grimbot_brain/safety.py`.
 
+By default, local cycle logs are stored at `memory/grimbot_brain.sqlite3`.
+
 ## Setup
 
 ```powershell

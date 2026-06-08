@@ -1,15 +1,16 @@
 from __future__ import annotations
 
-from datetime import datetime
 from typing import Literal
 
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 
 RobotAction = Literal["stop", "move_forward", "turn_left", "turn_right", "reverse", "idle"]
 
 
 class IMUReading(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
     accel_x: float = 0.0
     accel_y: float = 0.0
     accel_z: float = 9.8
@@ -19,12 +20,14 @@ class IMUReading(BaseModel):
 
 
 class BrainCycleInput(BaseModel):
-    image_path: str | None = None
-    mock_camera_frame: str | None = None
+    model_config = ConfigDict(extra="forbid")
+
+    image_path: str | None = Field(default=None, max_length=500)
+    mock_camera_frame: str | None = Field(default=None, max_length=2000)
     imu: IMUReading = Field(default_factory=IMUReading)
     battery_percentage: float = Field(ge=0, le=100)
-    distance_cm: float = Field(ge=0)
-    user_command: str = ""
+    distance_cm: float = Field(ge=0, le=10000)
+    user_command: str = Field(default="", max_length=500)
 
     @field_validator("user_command")
     @classmethod
@@ -33,29 +36,26 @@ class BrainCycleInput(BaseModel):
 
 
 class PerceptionResult(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
     mode: Literal["mock", "gemini"]
-    scene_summary: str
+    scene_summary: str = Field(min_length=1, max_length=2000)
     obstacle_detected: bool = False
-    obstacle_distance_cm: float | None = None
+    obstacle_distance_cm: float | None = Field(default=None, ge=0, le=10000)
     confidence: float = Field(default=0.5, ge=0, le=1)
 
 
 class RobotIntent(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
     requested_action: RobotAction
     requested_speed: float = Field(ge=0, le=1)
-    reason: str
+    reason: str = Field(min_length=1, max_length=500)
 
 
 class RobotCommand(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
     action: RobotAction
     speed: float = Field(ge=0, le=1)
-    reason: str
-
-
-class LoggedCycle(BaseModel):
-    id: int
-    created_at: datetime
-    cycle_input: BrainCycleInput
-    perception: PerceptionResult
-    intent: RobotIntent
-    command: RobotCommand
+    reason: str = Field(min_length=1, max_length=500)

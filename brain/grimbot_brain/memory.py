@@ -10,7 +10,7 @@ from .schemas import BrainCycleInput, PerceptionResult, RobotCommand, RobotInten
 
 class BrainMemory:
     def __init__(self, db_path: str | Path | None = None) -> None:
-        self.db_path = Path(db_path or os.getenv("GRIMBOT_DB_PATH", "grimbot_brain.sqlite3"))
+        self.db_path = Path(db_path or os.getenv("GRIMBOT_DB_PATH", "memory/grimbot_brain.sqlite3"))
         self._initialize()
 
     def log_cycle(
@@ -37,6 +37,7 @@ class BrainMemory:
             return int(cursor.lastrowid)
 
     def recent_cycles(self, limit: int = 10) -> list[dict]:
+        safe_limit = max(1, min(limit, 100))
         with sqlite3.connect(self.db_path) as connection:
             connection.row_factory = sqlite3.Row
             rows = connection.execute(
@@ -46,7 +47,7 @@ class BrainMemory:
                 ORDER BY id DESC
                 LIMIT ?
                 """,
-                (limit,),
+                (safe_limit,),
             ).fetchall()
 
         return [

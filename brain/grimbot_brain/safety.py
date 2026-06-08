@@ -6,6 +6,9 @@ MIN_BATTERY_PERCENTAGE = 10.0
 MIN_OBSTACLE_DISTANCE_CM = 25.0
 MAX_SAFE_SPEED = 0.5
 MAX_SAFE_TILT_ACCEL = 6.0
+MIN_SAFE_VERTICAL_ACCEL = 4.0
+MAX_SAFE_VERTICAL_ACCEL = 14.0
+MAX_SAFE_GYRO_RATE = 180.0
 MOVEMENT_ACTIONS = {"move_forward", "turn_left", "turn_right", "reverse"}
 
 
@@ -32,7 +35,14 @@ def validate_action(cycle_input: BrainCycleInput, intent: RobotIntent) -> RobotC
 
 def _is_unstable(cycle_input: BrainCycleInput) -> bool:
     imu = cycle_input.imu
-    return abs(imu.accel_x) > MAX_SAFE_TILT_ACCEL or abs(imu.accel_y) > MAX_SAFE_TILT_ACCEL
+    tilted = abs(imu.accel_x) > MAX_SAFE_TILT_ACCEL or abs(imu.accel_y) > MAX_SAFE_TILT_ACCEL
+    vertical_accel_unsafe = imu.accel_z < MIN_SAFE_VERTICAL_ACCEL or imu.accel_z > MAX_SAFE_VERTICAL_ACCEL
+    rotating_too_fast = (
+        abs(imu.gyro_x) > MAX_SAFE_GYRO_RATE
+        or abs(imu.gyro_y) > MAX_SAFE_GYRO_RATE
+        or abs(imu.gyro_z) > MAX_SAFE_GYRO_RATE
+    )
+    return tilted or vertical_accel_unsafe or rotating_too_fast
 
 
 def _stop(reason: str) -> RobotCommand:

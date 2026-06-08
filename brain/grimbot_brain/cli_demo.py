@@ -3,10 +3,8 @@ from __future__ import annotations
 import json
 import os
 
+from .cycle import execute_cycle
 from .memory import BrainMemory
-from .perception import perceive
-from .planner import plan
-from .safety import validate_action
 from .schemas import BrainCycleInput, IMUReading
 
 
@@ -36,10 +34,7 @@ def main() -> None:
             distance_cm=distance_cm,
             user_command=command_text,
         )
-        perception = perceive(cycle_input)
-        intent = plan(cycle_input, perception)
-        command = validate_action(cycle_input, intent)
-        memory.log_cycle(cycle_input, perception, intent, command)
+        command = execute_cycle(cycle_input, memory)
         print(json.dumps(command.model_dump(), separators=(",", ":")))
 
 

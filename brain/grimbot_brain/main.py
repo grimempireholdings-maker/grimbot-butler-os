@@ -1,17 +1,15 @@
 from __future__ import annotations
 
-from fastapi import FastAPI
 from dotenv import load_dotenv
+from fastapi import FastAPI, Query
 
+from .cycle import execute_cycle
 from .memory import BrainMemory
-from .perception import perceive
-from .planner import plan
-from .safety import validate_action
 from .schemas import BrainCycleInput, RobotCommand
 
 load_dotenv()
 
-app = FastAPI(title="GrimBot Brain v0", version="0.1.0")
+app = FastAPI(title="GrimBot Butler OS Brain", version="0.1.0")
 memory = BrainMemory()
 
 
@@ -22,13 +20,9 @@ def health() -> dict[str, str]:
 
 @app.post("/cycle", response_model=RobotCommand)
 def run_cycle(cycle_input: BrainCycleInput) -> RobotCommand:
-    perception = perceive(cycle_input)
-    intent = plan(cycle_input, perception)
-    command = validate_action(cycle_input, intent)
-    memory.log_cycle(cycle_input, perception, intent, command)
-    return command
+    return execute_cycle(cycle_input, memory)
 
 
 @app.get("/cycles")
-def recent_cycles(limit: int = 10) -> list[dict]:
+def recent_cycles(limit: int = Query(default=10, ge=1, le=100)) -> list[dict]:
     return memory.recent_cycles(limit=limit)
