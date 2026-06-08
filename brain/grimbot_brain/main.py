@@ -9,6 +9,7 @@ from .maya_core import build_maya_briefing
 from .memory import BrainMemory
 from .robot_memory import RobotMemory
 from .room_scan import run_room_scan
+from .skills import create_default_registry
 from .response_composer import compose_maya_response
 from .schemas import (
     BrainCycleInput,
@@ -25,13 +26,16 @@ from .schemas import (
     RoomMemorySummary,
     RoomScanRequest,
     RoomScanResult,
+    SkillInfo,
+    SkillRunRequest,
+    SkillRunResult,
     VoiceConversationRequest,
     VoiceConversationResponse,
 )
 
 load_dotenv()
 
-app = FastAPI(title="GrimBot Butler OS Brain", version="0.5.0")
+app = FastAPI(title="GrimBot Butler OS Brain", version="0.6.0")
 memory = BrainMemory()
 
 
@@ -114,3 +118,27 @@ def voice_conversation(request: VoiceConversationRequest) -> VoiceConversationRe
         return run_voice_conversation(request, memory)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@app.get("/skills", response_model=list[SkillInfo])
+def skills_list(category: str | None = None) -> list[SkillInfo]:
+    registry = create_default_registry(memory)
+    if category:
+        return registry.find_by_category(category)
+    return registry.list_skills()
+
+
+@app.get("/skills/{skill_name}", response_model=SkillInfo)
+def skills_get(skill_name: str) -> SkillInfo:
+    skill = create_default_registry(memory).get(skill_name)
+    if not skill:
+        raise HTTPException(status_code=404, detail=f"Unknown skill: {skill_name}")
+    return skill.info()
+
+
+@app.post("/skills/{skill_name}/run", response_model=SkillRunResult)
+def skills_run(skill_name: str, request: SkillRunRequest) -> SkillRunResult:
+    try:
+        return create_default_registry(memory).run(skill_name, request)
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc

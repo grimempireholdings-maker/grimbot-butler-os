@@ -12,6 +12,7 @@ AssistantMode = Literal["maya_chief_of_staff", "neutral_robot", "quiet_observer"
 PermissionLevel = Literal["observe", "suggest", "ask_approval", "execute"]
 MayaResponseMode = Literal["default", "cleanup_coaching"]
 VoiceMode = Literal["mock", "local"]
+SkillCategory = Literal["planning", "memory", "briefing", "productivity"]
 
 
 class IMUReading(BaseModel):
@@ -249,3 +250,42 @@ class VoiceConversationResponse(BaseModel):
     maya_response: MayaComposedResponse
     speech_output: TextToSpeechResult
     machine_output: dict
+
+
+class SkillInfo(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    name: str = Field(min_length=1, max_length=120)
+    description: str = Field(min_length=1, max_length=500)
+    category: SkillCategory
+    required_permission: PermissionLevel
+    inputs_schema: dict
+    outputs_schema: dict
+
+
+class SkillRunRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    inputs: dict = Field(default_factory=dict)
+    permission: PermissionLevel = "suggest"
+    assistant_mode: AssistantMode = "maya_chief_of_staff"
+    verified: bool = False
+
+
+class SkillRunResult(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    skill: SkillInfo
+    allowed: bool
+    permission: PermissionLevel
+    machine_output: dict
+    maya_response: MayaComposedResponse
+
+
+class SkillMachineOutput(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    skill: str = Field(min_length=1, max_length=120)
+    status: str = Field(min_length=1, max_length=50)
+    next_best_action: str = Field(min_length=1, max_length=500)
+    data: dict = Field(default_factory=dict)
