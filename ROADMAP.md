@@ -16,22 +16,28 @@
 
 ## Phase 3
 
-- [ ] Voice Input
-- [ ] Voice Output
+- [x] Maya Core
+- [x] Assistant Modes
+- [x] Briefings
 
 ## Phase 4
 
-- [ ] Agentic Butler OS Skills
+- [ ] Voice Input
+- [ ] Voice Output
 
 ## Phase 5
 
-- [ ] Rover Hardware
+- [ ] Agentic Butler OS Skills
 
 ## Phase 6
 
-- [ ] Manipulation
+- [ ] Rover Hardware
 
 ## Phase 7
+
+- [ ] Manipulation
+
+## Phase 8
 
 - [ ] Synth Platform
 

@@ -1,7 +1,7 @@
 [project]
 name = "grimbot-brain"
-version = "0.3.0"
-description = "GrimBot Butler OS: modular robot brain, vision, and structured robot memory."
+version = "0.4.0"
+description = "GrimBot Butler OS: modular robot brain, vision, memory, and Maya assistant core."
 readme = "README.md"
 requires-python = ">=3.10"
 dependencies = [
