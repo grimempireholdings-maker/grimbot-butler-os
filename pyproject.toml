@@ -1,0 +1,33 @@
+[project]
+name = "grimbot-brain"
+version = "0.1.0"
+description = "GrimBot Brain v0: a simulated robot brain with perception, planning, safety, and memory."
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = [
+    "fastapi>=0.115.0",
+    "uvicorn[standard]>=0.30.0",
+    "pydantic>=2.7.0",
+    "python-dotenv>=1.0.0",
+]
+
+[project.optional-dependencies]
+gemini = [
+    "google-generativeai>=0.8.0",
+]
+dev = [
+    "pytest>=8.0.0",
+]
+
+[project.scripts]
+grimbot-demo = "grimbot_brain.cli_demo:main"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["brain"]
+
+[tool.setuptools]
+package-dir = {"" = "brain"}
+
+[tool.setuptools.packages.find]
+where = ["brain"]
