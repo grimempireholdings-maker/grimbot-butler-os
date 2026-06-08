@@ -13,6 +13,26 @@ PermissionLevel = Literal["observe", "suggest", "ask_approval", "execute"]
 MayaResponseMode = Literal["default", "cleanup_coaching"]
 VoiceMode = Literal["mock", "local"]
 SkillCategory = Literal["planning", "memory", "briefing", "productivity"]
+StateSignalName = Literal[
+    "attention",
+    "urgency",
+    "novelty",
+    "confidence",
+    "reward",
+    "friction",
+    "fatigue",
+    "curiosity",
+]
+StateEventType = Literal[
+    "hazard_observed",
+    "cleanup_succeeded",
+    "recommendation_ignored",
+    "discovery",
+    "unsafe_sensor",
+    "low_battery",
+    "room_scan_observation",
+    "memory_frequency",
+]
 
 
 class IMUReading(BaseModel):
@@ -120,6 +140,7 @@ class RelevantMemoryRequest(BaseModel):
     room_name: str | None = Field(default=None, max_length=120)
     zone_name: str | None = Field(default=None, max_length=120)
     limit: int = Field(default=10, ge=1, le=50)
+    adaptive_state: dict[str, float] | None = Field(default=None)
 
 
 class MemoryRecord(BaseModel):
@@ -178,6 +199,7 @@ class MayaComposeRequest(BaseModel):
     verified: bool = False
     requested_permission: PermissionLevel = "suggest"
     user_goal: str | None = Field(default=None, max_length=500)
+    adaptive_state: dict[str, float] | None = Field(default=None)
 
 
 class MayaComposedResponse(BaseModel):
@@ -270,6 +292,7 @@ class SkillRunRequest(BaseModel):
     permission: PermissionLevel = "suggest"
     assistant_mode: AssistantMode = "maya_chief_of_staff"
     verified: bool = False
+    include_state: bool = True
 
 
 class SkillRunResult(BaseModel):
@@ -289,3 +312,57 @@ class SkillMachineOutput(BaseModel):
     status: str = Field(min_length=1, max_length=50)
     next_best_action: str = Field(min_length=1, max_length=500)
     data: dict = Field(default_factory=dict)
+
+
+class StateSignal(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    name: StateSignalName
+    current_value: float = Field(ge=0, le=1)
+    min_value: float = Field(ge=0, le=1)
+    max_value: float = Field(ge=0, le=1)
+    baseline: float = Field(ge=0, le=1)
+    decay_rate: float = Field(ge=0, le=1)
+    last_updated: str
+    source: str = Field(min_length=1, max_length=120)
+    reason: str = Field(min_length=1, max_length=500)
+
+
+class StateSnapshot(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    signals: list[StateSignal]
+    values: dict[str, float]
+    next_best_action: str = Field(min_length=1, max_length=500)
+
+
+class StateEventRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    event_type: StateEventType
+    intensity: float = Field(default=0.5, ge=0, le=1)
+    room_name: str | None = Field(default=None, max_length=120)
+    zone_name: str | None = Field(default=None, max_length=120)
+    reason: str = Field(default="state event", min_length=1, max_length=500)
+    metadata: dict = Field(default_factory=dict)
+
+
+class StateEventResponse(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    event_type: StateEventType
+    updated_signals: list[StateSignal]
+    snapshot: StateSnapshot
+
+
+class StateDecayRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    elapsed_seconds: float | None = Field(default=None, ge=0, le=604800)
+    reason: str = Field(default="scheduled decay", min_length=1, max_length=500)
+
+
+class StateResetRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    reason: str = Field(default="manual reset", min_length=1, max_length=500)

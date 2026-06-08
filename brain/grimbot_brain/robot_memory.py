@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import math
 import re
 import sqlite3
 from dataclasses import dataclass
@@ -115,8 +116,12 @@ class RobotMemory:
         return self._filtered_records("mess_observations", room_name, zone_name, limit)
 
     def relevant(self, request: RelevantMemoryRequest) -> RelevantMemoryResult:
-        hazards = self.hazards(request.room_name, request.zone_name, request.limit)
-        mess_zones = self.mess_zones(request.room_name, request.zone_name, request.limit)
+        state_values = request.adaptive_state or {}
+        urgency = _state_value(state_values, "urgency")
+        curiosity = _state_value(state_values, "curiosity")
+        retrieval_limit = min(50, request.limit + 5) if urgency >= 0.65 or curiosity >= 0.65 else request.limit
+        hazards = self.hazards(request.room_name, request.zone_name, retrieval_limit)
+        mess_zones = self.mess_zones(request.room_name, request.zone_name, retrieval_limit)
         with self._connect() as connection:
             room_id = self._room_id(connection, request.room_name)
             if request.room_name and room_id is None:
@@ -133,9 +138,9 @@ class RobotMemory:
                         "cleanup_tasks",
                         room_id=room_id,
                         zone_id=zone_id,
-                        limit=request.limit,
+                        limit=retrieval_limit,
                     )
-                    facts = self._facts(connection, room_id, limit=request.limit)
+                    facts = self._facts(connection, room_id, limit=retrieval_limit)
 
         return RelevantMemoryResult(
             query=request.query,
@@ -144,7 +149,7 @@ class RobotMemory:
             mess_zones=mess_zones,
             cleanup_tasks=cleanup_tasks,
             semantic_facts=facts,
-            next_best_action=self._next_action(hazards, mess_zones, cleanup_tasks),
+            next_best_action=self._state_next_action(state_values, hazards, mess_zones, cleanup_tasks),
         )
 
     def _connect(self) -> sqlite3.Connection:
@@ -514,6 +519,22 @@ class RobotMemory:
             return f"clean recurring mess zone: {mess_zones[0].name}"
         return "scan room for current conditions"
 
+    def _state_next_action(
+        self,
+        state_values: dict[str, float],
+        hazards: list[MemoryRecord],
+        mess_zones: list[MemoryRecord],
+        cleanup_tasks: list[MemoryRecord],
+    ) -> str:
+        base_action = self._next_action(hazards, mess_zones, cleanup_tasks)
+        if _state_value(state_values, "urgency") >= 0.65 and hazards:
+            return f"{base_action} before lower-priority organization"
+        if _state_value(state_values, "friction") >= 0.60 and mess_zones:
+            return f"pick one small cleanup step for: {mess_zones[0].name}"
+        if _state_value(state_values, "curiosity") >= 0.65 and not hazards:
+            return "review recent room memory before choosing a cleanup task"
+        return base_action
+
 
 def _normalize(value: str) -> str:
     normalized = re.sub(r"[^a-z0-9]+", " ", value.lower()).strip()
@@ -523,3 +544,13 @@ def _normalize(value: str) -> str:
 def _display_name(value: str, fallback: str) -> str:
     display = value.strip()
     return display[:120] if display else fallback
+
+
+def _state_value(values: dict[str, float], key: str) -> float:
+    try:
+        value = float(values.get(key, 0.0))
+    except (TypeError, ValueError):
+        return 0.0
+    if not math.isfinite(value):
+        return 0.0
+    return max(0.0, min(1.0, value))

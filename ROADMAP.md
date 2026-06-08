@@ -32,17 +32,23 @@
 
 ## Phase 6
 
-- [ ] External Tool Use
+- [x] Adaptive State / Pheromone Engine
+- [x] State-Influenced Maya Responses
+- [x] State-Ranked Skill Suggestions
 
 ## Phase 7
 
-- [ ] Rover Hardware
+- [ ] External Tool Use
 
 ## Phase 8
 
-- [ ] Manipulation
+- [ ] Rover Hardware
 
 ## Phase 9
+
+- [ ] Manipulation
+
+## Phase 10
 
 - [ ] Synth Platform
 

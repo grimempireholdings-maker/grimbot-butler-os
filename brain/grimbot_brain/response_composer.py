@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import math
 import re
 
 from .persona import directives_for_mode, resolve_permission, verification_phrase
@@ -41,8 +42,11 @@ def _neutral_text(request: MayaComposeRequest, permission: str) -> str:
 
 def _maya_text(request: MayaComposeRequest, permission: str) -> str:
     summary = _safe_part(_extract_summary(request.raw_output), request.verified)
+    state_prefix = _state_prefix(request.adaptive_state)
     if _is_stop_command(request.raw_output):
         return f"{verification_phrase(request.verified)} Safety wins: {summary}"
+    if state_prefix:
+        summary = f"{state_prefix} {summary}"
     if permission == "ask_approval":
         return f"{verification_phrase(request.verified)} I need approval before acting. Recommendation: {summary}"
     return f"{verification_phrase(request.verified)} Here is the signal: {summary}"
@@ -50,6 +54,9 @@ def _maya_text(request: MayaComposeRequest, permission: str) -> str:
 
 def _cleanup_coaching_text(request: MayaComposeRequest, permission: str) -> str:
     action = _safe_part(_extract_next_action(request.raw_output), request.verified)
+    state_prefix = _state_prefix(request.adaptive_state)
+    if state_prefix:
+        action = f"{state_prefix} {action}"
     if _is_stop_command(request.raw_output):
         return f"{verification_phrase(request.verified)} Stop first. {action}"
     if permission == "ask_approval":
@@ -94,3 +101,34 @@ def _safe_part(value: str, verified: bool) -> str:
     if len(text) > MAX_RESPONSE_PART_LENGTH:
         return text[: MAX_RESPONSE_PART_LENGTH - 3].rstrip() + "..."
     return text or "Structured output received."
+
+
+def _state_prefix(adaptive_state: dict[str, float] | None) -> str:
+    if not adaptive_state:
+        return ""
+
+    urgency = _state_value(adaptive_state, "urgency")
+    friction = _state_value(adaptive_state, "friction")
+    confidence = _state_value(adaptive_state, "confidence")
+    novelty = _state_value(adaptive_state, "novelty")
+    curiosity = _state_value(adaptive_state, "curiosity")
+
+    if urgency >= 0.65:
+        return "Urgency is elevated, so I will keep this concise."
+    if friction >= 0.60:
+        return "Pressure is high; one small step is enough."
+    if confidence >= 0.70:
+        return "Confidence is high; I recommend this clearly."
+    if novelty >= 0.60 or curiosity >= 0.65:
+        return "New context is showing up; exploration is useful."
+    return ""
+
+
+def _state_value(adaptive_state: dict[str, float], key: str) -> float:
+    try:
+        value = float(adaptive_state.get(key, 0.0))
+    except (TypeError, ValueError):
+        return 0.0
+    if not math.isfinite(value):
+        return 0.0
+    return max(0.0, min(1.0, value))

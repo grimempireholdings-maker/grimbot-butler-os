@@ -264,4 +264,19 @@ class BrainMemory:
                 )
                 """
             )
+            connection.execute(
+                """
+                CREATE TABLE IF NOT EXISTS adaptive_state_signals (
+                    name TEXT PRIMARY KEY,
+                    current_value REAL NOT NULL,
+                    min_value REAL NOT NULL,
+                    max_value REAL NOT NULL,
+                    baseline REAL NOT NULL,
+                    decay_rate REAL NOT NULL,
+                    last_updated TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                    source TEXT NOT NULL DEFAULT 'system',
+                    reason TEXT NOT NULL DEFAULT 'initialized'
+                )
+                """
+            )
             connection.commit()
