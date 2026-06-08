@@ -12,7 +12,7 @@ Create a safe, affordable personal robotic assistant capable of perception, memo
 - [x] Vision
 - [x] Long-Term Memory
 - [x] Maya Core
-- [ ] Voice
+- [x] Push-to-Talk Voice
 - [ ] Agentic Tool Use
 - [ ] Rover Platform
 - [ ] Object Manipulation
@@ -28,6 +28,8 @@ Phase 1 adds GrimBot Vision v0.2: safe local webcam frame capture, approved-imag
 Phase 2 adds GrimBot Robot Memory v0.3: structured SQLite memory for rooms, zones, known objects, hazards, mess observations, cleanup tasks, episodic memories, and semantic facts.
 
 Phase 3 adds GrimBot Maya Core v0.4: assistant modes, permission logic, Maya-style response composition, cleanup coaching, and structured briefings.
+
+Phase 4 adds GrimBot Conversational Voice v0.5: push-to-talk speech-to-text, Maya response composition, robot memory retrieval, and mock text-to-speech output.
 
 LLM output is never connected directly to motors. Every movement command must pass through `brain/grimbot_brain/safety.py`.
 
@@ -56,6 +58,8 @@ To enable real webcam capture:
 ```powershell
 pip install -e ".[vision]"
 ```
+
+Voice I/O works in mock mode by default and does not require microphone hardware.
 
 ## Run Brain Server
 
@@ -189,6 +193,42 @@ Example composed response shape:
 ```
 
 Maya never overrides `safety.py` and never presents unverified information as verified.
+
+## Voice I/O
+
+Voice is push-to-talk only.
+
+- No always-listening mode
+- No wake word
+- No autonomous action trigger
+- No motors
+- No external agentic tools
+
+Voice endpoint:
+
+```text
+POST /voice/conversation
+```
+
+CLI mock demo:
+
+```powershell
+python -m grimbot_brain.voice_cli --push-to-talk --mock-transcript "what should I clean first?"
+```
+
+Voice conversation responses keep command and memory JSON separate from speech output:
+
+```json
+{
+  "transcript": "what should I clean first?",
+  "machine_output": {"next_best_action": "clear hazard: loose cord on floor"},
+  "speech_output": {
+    "text": "Not verified yet. Here is the signal: Next best action is clear hazard: loose cord on floor",
+    "mode": "mock",
+    "audio_path": null
+  }
+}
+```
 
 ## Test
 

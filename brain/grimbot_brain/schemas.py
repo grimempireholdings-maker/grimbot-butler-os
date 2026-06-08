@@ -11,6 +11,7 @@ MemoryKind = Literal["observation", "preference", "instruction", "fact"]
 AssistantMode = Literal["maya_chief_of_staff", "neutral_robot", "quiet_observer"]
 PermissionLevel = Literal["observe", "suggest", "ask_approval", "execute"]
 MayaResponseMode = Literal["default", "cleanup_coaching"]
+VoiceMode = Literal["mock", "local"]
 
 
 class IMUReading(BaseModel):
@@ -209,3 +210,42 @@ class MayaBriefing(BaseModel):
     wins: list[str] = Field(default_factory=list, max_length=10)
     hazards: list[str] = Field(default_factory=list, max_length=10)
     next_best_action: str = Field(min_length=1, max_length=500)
+
+
+class VoiceConversationRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    push_to_talk: bool
+    mock_transcript: str | None = Field(default=None, max_length=1000)
+    audio_path: str | None = Field(default=None, max_length=500)
+    room_name: str | None = Field(default=None, max_length=120)
+    zone_name: str | None = Field(default=None, max_length=120)
+    assistant_mode: AssistantMode = "maya_chief_of_staff"
+    response_mode: MayaResponseMode = "default"
+    verified: bool = False
+
+
+class SpeechToTextResult(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    transcript: str = Field(min_length=1, max_length=1000)
+    mode: VoiceMode
+    source: str
+
+
+class TextToSpeechResult(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    text: str = Field(min_length=1, max_length=2000)
+    mode: VoiceMode
+    audio_path: str | None = Field(default=None, max_length=500)
+
+
+class VoiceConversationResponse(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    transcript: str = Field(min_length=1, max_length=1000)
+    memory_context: RelevantMemoryResult
+    maya_response: MayaComposedResponse
+    speech_output: TextToSpeechResult
+    machine_output: dict

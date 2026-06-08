@@ -22,8 +22,8 @@
 
 ## Phase 4
 
-- [ ] Voice Input
-- [ ] Voice Output
+- [x] Push-to-Talk Voice Input
+- [x] Mock Speech Output
 
 ## Phase 5
 
