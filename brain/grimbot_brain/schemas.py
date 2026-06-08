@@ -8,6 +8,9 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator
 RobotAction = Literal["stop", "move_forward", "turn_left", "turn_right", "reverse", "idle"]
 VisionMode = Literal["mock", "gemini"]
 MemoryKind = Literal["observation", "preference", "instruction", "fact"]
+AssistantMode = Literal["maya_chief_of_staff", "neutral_robot", "quiet_observer"]
+PermissionLevel = Literal["observe", "suggest", "ask_approval", "execute"]
+MayaResponseMode = Literal["default", "cleanup_coaching"]
 
 
 class IMUReading(BaseModel):
@@ -162,3 +165,47 @@ class RememberResponse(BaseModel):
 
     episodic_memory_id: int
     semantic_fact: dict
+
+
+class MayaComposeRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    raw_output: dict
+    mode: AssistantMode = "maya_chief_of_staff"
+    response_mode: MayaResponseMode = "default"
+    verified: bool = False
+    requested_permission: PermissionLevel = "suggest"
+    user_goal: str | None = Field(default=None, max_length=500)
+
+
+class MayaComposedResponse(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    mode: AssistantMode
+    permission: PermissionLevel
+    verified: bool
+    directives_applied: list[str] = Field(max_length=10)
+    machine_output: dict
+    user_response: str = Field(min_length=1, max_length=2000)
+
+
+class MayaBriefingRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    room_name: str | None = Field(default=None, max_length=120)
+    zone_name: str | None = Field(default=None, max_length=120)
+    verified: bool = False
+    mode: AssistantMode = "maya_chief_of_staff"
+
+
+class MayaBriefing(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    mode: AssistantMode
+    permission: PermissionLevel
+    verified: bool
+    priority_items: list[str] = Field(default_factory=list, max_length=10)
+    fyi: list[str] = Field(default_factory=list, max_length=10)
+    wins: list[str] = Field(default_factory=list, max_length=10)
+    hazards: list[str] = Field(default_factory=list, max_length=10)
+    next_best_action: str = Field(min_length=1, max_length=500)

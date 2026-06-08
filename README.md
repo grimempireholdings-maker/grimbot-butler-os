@@ -11,6 +11,7 @@ Create a safe, affordable personal robotic assistant capable of perception, memo
 - [x] Brain Simulation
 - [x] Vision
 - [x] Long-Term Memory
+- [x] Maya Core
 - [ ] Voice
 - [ ] Agentic Tool Use
 - [ ] Rover Platform
@@ -25,6 +26,8 @@ Phase 0 includes a runnable Python/FastAPI robot brain simulator. It accepts sen
 Phase 1 adds GrimBot Vision v0.2: safe local webcam frame capture, approved-image validation, and Gemini or mock room scans that return structured JSON.
 
 Phase 2 adds GrimBot Robot Memory v0.3: structured SQLite memory for rooms, zones, known objects, hazards, mess observations, cleanup tasks, episodic memories, and semantic facts.
+
+Phase 3 adds GrimBot Maya Core v0.4: assistant modes, permission logic, Maya-style response composition, cleanup coaching, and structured briefings.
 
 LLM output is never connected directly to motors. Every movement command must pass through `brain/grimbot_brain/safety.py`.
 
@@ -138,6 +141,54 @@ Example recall shape:
 ```
 
 Memory can inform planning context later, but it never overrides `safety.py`.
+
+## Maya Core
+
+Maya Core keeps machine commands separate from user-facing assistant responses.
+
+Assistant modes:
+
+- `maya_chief_of_staff`
+- `neutral_robot`
+- `quiet_observer`
+
+Maya directives:
+
+- Protect the Asset
+- Buy Back Time
+- Ensure Profitability
+- Verify before acting
+- Clarity over cleverness
+
+Permission levels:
+
+- `observe`
+- `suggest`
+- `ask_approval`
+- `execute`
+
+Permission labels are advisory inside Maya Core. v0.4 does not add motors, voice, or external agentic tools.
+
+Maya endpoints:
+
+```text
+POST /maya/compose
+POST /maya/briefing
+```
+
+Example composed response shape:
+
+```json
+{
+  "mode": "maya_chief_of_staff",
+  "permission": "suggest",
+  "verified": false,
+  "machine_output": {"action": "stop", "speed": 0, "reason": "Obstacle too close"},
+  "user_response": "Not verified yet. Safety wins: stop: Obstacle too close"
+}
+```
+
+Maya never overrides `safety.py` and never presents unverified information as verified.
 
 ## Test
 

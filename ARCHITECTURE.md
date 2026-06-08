@@ -84,3 +84,33 @@ Robot memory supports:
 - returning relevant cleanup context and the next best cleanup action
 
 Memory may provide planning context, but safety remains authoritative. A remembered fact that a hallway is usually clear cannot override a live obstacle stop from `safety.py`.
+
+## Current Maya Core Flow
+
+v0.4 adds Maya as a personality, judgment, and communication layer. Maya does not create machine commands. She composes user-facing responses around existing structured output.
+
+Assistant modes:
+
+- `maya_chief_of_staff` applies Protect the Asset, Buy Back Time, Ensure Profitability, Verify before acting, and Clarity over cleverness.
+- `neutral_robot` keeps responses plain and procedural.
+- `quiet_observer` observes only and does not recommend execution.
+
+Permission levels are explicit:
+
+- `observe`
+- `suggest`
+- `ask_approval`
+- `execute`
+
+These are response-layer permission labels. v0.4 does not add execution machinery, motor control, voice, or external agentic tools.
+
+Response composition returns both fields separately:
+
+```json
+{
+  "machine_output": {"action": "stop", "speed": 0, "reason": "Obstacle too close"},
+  "user_response": "Verified. Safety wins: stop: Obstacle too close"
+}
+```
+
+Maya briefing summarizes priority items, FYI, wins, hazards, and the next best action from robot memory. Verification status is explicit; Maya must not label information verified unless the caller marks it verified.

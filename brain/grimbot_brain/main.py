@@ -4,11 +4,17 @@ from dotenv import load_dotenv
 from fastapi import FastAPI, Query
 
 from .cycle import execute_cycle
+from .maya_core import build_maya_briefing
 from .memory import BrainMemory
 from .robot_memory import RobotMemory
 from .room_scan import run_room_scan
+from .response_composer import compose_maya_response
 from .schemas import (
     BrainCycleInput,
+    MayaBriefing,
+    MayaBriefingRequest,
+    MayaComposeRequest,
+    MayaComposedResponse,
     MemoryRecord,
     RelevantMemoryRequest,
     RelevantMemoryResult,
@@ -22,7 +28,7 @@ from .schemas import (
 
 load_dotenv()
 
-app = FastAPI(title="GrimBot Butler OS Brain", version="0.3.0")
+app = FastAPI(title="GrimBot Butler OS Brain", version="0.4.0")
 memory = BrainMemory()
 
 
@@ -87,3 +93,13 @@ def memory_mess_zones(
 @app.post("/memory/relevant", response_model=RelevantMemoryResult)
 def memory_relevant(request: RelevantMemoryRequest) -> RelevantMemoryResult:
     return RobotMemory(memory).relevant(request)
+
+
+@app.post("/maya/compose", response_model=MayaComposedResponse)
+def maya_compose(request: MayaComposeRequest) -> MayaComposedResponse:
+    return compose_maya_response(request)
+
+
+@app.post("/maya/briefing", response_model=MayaBriefing)
+def maya_briefing(request: MayaBriefingRequest) -> MayaBriefing:
+    return build_maya_briefing(request, RobotMemory(memory))
