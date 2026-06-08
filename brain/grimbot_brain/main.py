@@ -1,8 +1,9 @@
 from __future__ import annotations
 
 from dotenv import load_dotenv
-from fastapi import FastAPI, Query
+from fastapi import FastAPI, HTTPException, Query
 
+from .conversation import run_voice_conversation
 from .cycle import execute_cycle
 from .maya_core import build_maya_briefing
 from .memory import BrainMemory
@@ -24,11 +25,13 @@ from .schemas import (
     RoomMemorySummary,
     RoomScanRequest,
     RoomScanResult,
+    VoiceConversationRequest,
+    VoiceConversationResponse,
 )
 
 load_dotenv()
 
-app = FastAPI(title="GrimBot Butler OS Brain", version="0.4.0")
+app = FastAPI(title="GrimBot Butler OS Brain", version="0.5.0")
 memory = BrainMemory()
 
 
@@ -103,3 +106,11 @@ def maya_compose(request: MayaComposeRequest) -> MayaComposedResponse:
 @app.post("/maya/briefing", response_model=MayaBriefing)
 def maya_briefing(request: MayaBriefingRequest) -> MayaBriefing:
     return build_maya_briefing(request, RobotMemory(memory))
+
+
+@app.post("/voice/conversation", response_model=VoiceConversationResponse)
+def voice_conversation(request: VoiceConversationRequest) -> VoiceConversationResponse:
+    try:
+        return run_voice_conversation(request, memory)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc

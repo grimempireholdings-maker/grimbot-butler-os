@@ -114,3 +114,17 @@ Response composition returns both fields separately:
 ```
 
 Maya briefing summarizes priority items, FYI, wins, hazards, and the next best action from robot memory. Verification status is explicit; Maya must not label information verified unless the caller marks it verified.
+
+## Current Voice Flow
+
+v0.5 adds conversational voice as a push-to-talk I/O layer. It does not add always-listening behavior, wake words, motors, autonomous actions, or external tools.
+
+1. The caller must send `push_to_talk=true`.
+2. Speech-to-text runs in mock mode by default, using an explicit transcript.
+3. Optional audio paths must resolve inside the configured safe audio directory.
+4. The transcript queries robot memory for relevant context.
+5. Maya composes a user-facing response.
+6. Text-to-speech returns mock speech output by default.
+7. Machine output remains separate from speech text.
+
+Safety remains authoritative. Voice context can inform the conversation, but it cannot execute motion or override `safety.py`.
