@@ -469,6 +469,12 @@ class RobotMemory:
                 """
                 SELECT id, content, confidence, importance, count, first_seen, last_seen
                 FROM semantic_facts
+                WHERE NOT EXISTS (
+                    SELECT 1
+                    FROM promotion_queue
+                    WHERE promotion_queue.fact_id = semantic_facts.id
+                      AND promotion_queue.status IN ('pending', 'rejected')
+                )
                 ORDER BY importance DESC, count DESC, last_seen DESC
                 LIMIT ?
                 """,
@@ -480,6 +486,12 @@ class RobotMemory:
                 SELECT id, content, confidence, importance, count, first_seen, last_seen
                 FROM semantic_facts
                 WHERE room_id = ?
+                  AND NOT EXISTS (
+                      SELECT 1
+                      FROM promotion_queue
+                      WHERE promotion_queue.fact_id = semantic_facts.id
+                        AND promotion_queue.status IN ('pending', 'rejected')
+                  )
                 ORDER BY importance DESC, count DESC, last_seen DESC
                 LIMIT ?
                 """,

@@ -15,6 +15,7 @@ Create a safe, affordable personal robotic assistant capable of perception, memo
 - [x] Push-to-Talk Voice
 - [x] Safe Skills Registry
 - [x] Adaptive State Engine
+- [x] Dreaming Foundation
 - [ ] External Tool Use
 - [ ] Rover Platform
 - [ ] Object Manipulation
@@ -36,6 +37,8 @@ Phase 4 adds GrimBot Conversational Voice v0.5: push-to-talk speech-to-text, May
 Phase 5 adds GrimBot Skills Registry v0.6: safe internal butler skills with permission gates, Maya responses, and memory-backed planning.
 
 Phase 6 adds GrimBot Adaptive State v0.7: SQLite-backed state signals that influence attention, memory priority, skill suggestion, and Maya response style without adding emotions, consciousness, ML training, motors, or autonomous execution.
+
+Phase 7 adds GrimBot Dreaming Foundation v0.8: manual rule-based reflection, protected forgetting, candidate semantic facts, human promotion review, and auditable dream-cycle logs.
 
 LLM output is never connected directly to motors. Every movement command must pass through `brain/grimbot_brain/safety.py`.
 
@@ -306,6 +309,25 @@ Example state-informed response:
 ```
 
 Safety remains authoritative. Skills can plan and suggest, but they cannot execute movement.
+
+## Dreaming Foundation
+
+Dreaming is reflection, not reaction. v0.8 uses deterministic rule-based clustering only; it does not use an LLM provider or autonomous learning.
+
+Dream endpoints:
+
+```text
+POST /dream/run
+GET /dream/status
+GET /dream/facts
+GET /dream/promotions
+POST /dream/promotions/{id}/approve
+POST /dream/promotions/{id}/reject
+```
+
+Dream cycles are manual only. They read episodic memories and may write candidate semantic facts, promotion records, and dream logs. Pending and rejected facts are quarantined from active robot-memory retrieval. Only human-approved or anchored facts become available to normal recall.
+
+Dreaming never modifies `safety.py`, adaptive state, skills, actions, motors, or live episodic memory. There is no idle-time trigger, automatic dreaming, or automatic promotion.
 
 ## Test
 

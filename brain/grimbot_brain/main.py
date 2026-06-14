@@ -6,6 +6,15 @@ from fastapi import FastAPI, HTTPException, Query
 from .adaptive_state import AdaptiveState
 from .conversation import run_voice_conversation
 from .cycle import execute_cycle
+from .dreaming.dream_schemas import (
+    DreamRunRequest,
+    DreamRunResult,
+    DreamStatus,
+    PromotionQueueItem,
+    PromotionReviewRequest,
+    SemanticFact,
+)
+from .dreaming.dreaming_engine import DreamCycleConflictError, DreamingEngine
 from .maya_core import build_maya_briefing
 from .memory import BrainMemory
 from .robot_memory import RobotMemory
@@ -41,7 +50,7 @@ from .schemas import (
 
 load_dotenv()
 
-app = FastAPI(title="GrimBot Butler OS Brain", version="0.7.0")
+app = FastAPI(title="GrimBot Butler OS Brain", version="0.8.0")
 memory = BrainMemory()
 
 
@@ -172,3 +181,46 @@ def state_decay(request: StateDecayRequest) -> StateSnapshot:
 @app.post("/state/reset", response_model=StateSnapshot)
 def state_reset(request: StateResetRequest) -> StateSnapshot:
     return AdaptiveState(memory).reset(request.reason)
+
+
+@app.post("/dream/run", response_model=DreamRunResult)
+def dream_run(request: DreamRunRequest) -> DreamRunResult:
+    try:
+        return DreamingEngine(memory).run(request)
+    except DreamCycleConflictError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+
+
+@app.get("/dream/status", response_model=DreamStatus)
+def dream_status() -> DreamStatus:
+    return DreamingEngine(memory).status()
+
+
+@app.get("/dream/facts", response_model=list[SemanticFact])
+def dream_facts() -> list[SemanticFact]:
+    return DreamingEngine(memory).facts()
+
+
+@app.get("/dream/promotions", response_model=list[PromotionQueueItem])
+def dream_promotions() -> list[PromotionQueueItem]:
+    return DreamingEngine(memory).promotions()
+
+
+@app.post("/dream/promotions/{promotion_id}/approve", response_model=PromotionQueueItem)
+def dream_approve(promotion_id: int, request: PromotionReviewRequest) -> PromotionQueueItem:
+    try:
+        return DreamingEngine(memory).approve(promotion_id, request)
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+
+
+@app.post("/dream/promotions/{promotion_id}/reject", response_model=PromotionQueueItem)
+def dream_reject(promotion_id: int, request: PromotionReviewRequest) -> PromotionQueueItem:
+    try:
+        return DreamingEngine(memory).reject(promotion_id, request)
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
