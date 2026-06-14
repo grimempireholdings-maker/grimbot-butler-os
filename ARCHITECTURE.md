@@ -214,3 +214,32 @@ Dreaming writes only:
 - `dream_cycles`
 
 Dreaming does not modify adaptive state, execute skills, issue actions, control motors, or bypass `safety.py`. There are no automatic, scheduled, or idle-time dream triggers.
+
+## Current Procedural Memory Flow
+
+v0.9 adds storage, versioning, review, and matching for procedures without adding execution.
+
+Definitions:
+
+- A skill is an atomic capability.
+- A procedure is an ordered sequence of validated steps.
+- A workflow is a procedure with validated branches between step IDs.
+
+Procedure definitions use strict Pydantic models. Step IDs must be unique, branches must reference existing steps, strings are bounded, extra fields are forbidden, and confidence is bounded from 0 to 1.
+
+SQLite stores:
+
+- immutable procedure versions
+- passive execution-history records
+- pending procedure proposals
+
+Only active procedures are listed and matched by default. Updating a procedure archives the active version and inserts the next version. Historical versions remain available through rollback lookup. Pending proposals require explicit approval or rejection.
+
+Matching is deterministic:
+
+1. exact active procedure ID
+2. exact normalized active procedure name
+3. conservative fuzzy trigger matching with Python's standard library
+4. structured no-match output below the requested confidence threshold
+
+v0.9 exposes no execution endpoint. Procedural memory cannot invoke skills, mutate adaptive state, modify safety rules, control motors, or create external tool calls.

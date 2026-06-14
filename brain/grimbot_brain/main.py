@@ -17,6 +17,15 @@ from .dreaming.dream_schemas import (
 from .dreaming.dreaming_engine import DreamCycleConflictError, DreamingEngine
 from .maya_core import build_maya_briefing
 from .memory import BrainMemory
+from .procedural_memory.procedure_matcher import ProcedureMatcher
+from .procedural_memory.procedure_schemas import (
+    PendingProcedure,
+    PendingProcedureReview,
+    Procedure,
+    ProcedureMatchRequest,
+    ProcedureMatchResult,
+)
+from .procedural_memory.procedure_store import ProcedureStore
 from .robot_memory import RobotMemory
 from .room_scan import run_room_scan
 from .skills import create_default_registry
@@ -50,7 +59,7 @@ from .schemas import (
 
 load_dotenv()
 
-app = FastAPI(title="GrimBot Butler OS Brain", version="0.8.0")
+app = FastAPI(title="GrimBot Butler OS Brain", version="0.9.0")
 memory = BrainMemory()
 
 
@@ -224,3 +233,52 @@ def dream_reject(promotion_id: int, request: PromotionReviewRequest) -> Promotio
         raise HTTPException(status_code=404, detail=str(exc)) from exc
     except ValueError as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
+
+
+@app.get("/procedures", response_model=list[Procedure])
+def procedures_list() -> list[Procedure]:
+    return ProcedureStore(memory).list_procedures(active_only=True)
+
+
+@app.get("/procedures/pending", response_model=list[PendingProcedure])
+def procedures_pending() -> list[PendingProcedure]:
+    return ProcedureStore(memory).list_pending(pending_only=True)
+
+
+@app.post("/procedures/pending/{pending_id}/approve", response_model=PendingProcedure)
+def procedures_pending_approve(
+    pending_id: int,
+    request: PendingProcedureReview,
+) -> PendingProcedure:
+    try:
+        return ProcedureStore(memory).approve_pending(pending_id, request)
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+
+
+@app.post("/procedures/pending/{pending_id}/reject", response_model=PendingProcedure)
+def procedures_pending_reject(
+    pending_id: int,
+    request: PendingProcedureReview,
+) -> PendingProcedure:
+    try:
+        return ProcedureStore(memory).reject_pending(pending_id, request)
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+
+
+@app.post("/procedures/match", response_model=ProcedureMatchResult)
+def procedures_match(request: ProcedureMatchRequest) -> ProcedureMatchResult:
+    return ProcedureMatcher(ProcedureStore(memory)).match(request)
+
+
+@app.get("/procedures/{procedure_id}", response_model=Procedure)
+def procedures_get(procedure_id: int) -> Procedure:
+    procedure = ProcedureStore(memory).get(procedure_id)
+    if not procedure:
+        raise HTTPException(status_code=404, detail=f"Unknown procedure: {procedure_id}")
+    return procedure
