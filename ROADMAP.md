@@ -45,17 +45,24 @@
 
 ## Phase 8
 
-- [ ] External Tool Use
+- [x] Procedural Memory Schema
+- [x] Immutable Procedure Versioning
+- [x] Human-Reviewed Procedure Proposals
+- [x] Deterministic Procedure Matching
 
 ## Phase 9
 
-- [ ] Rover Hardware
+- [ ] External Tool Use
 
 ## Phase 10
 
-- [ ] Manipulation
+- [ ] Rover Hardware
 
 ## Phase 11
+
+- [ ] Manipulation
+
+## Phase 12
 
 - [ ] Synth Platform
 

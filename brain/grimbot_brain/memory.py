@@ -324,6 +324,67 @@ class BrainMemory:
                 )
                 """
             )
+            connection.execute(
+                """
+                CREATE TABLE IF NOT EXISTS procedures (
+                    procedure_id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    normalized_name TEXT NOT NULL,
+                    name TEXT NOT NULL,
+                    version INTEGER NOT NULL,
+                    status TEXT NOT NULL DEFAULT 'active'
+                        CHECK(status IN ('active', 'archived', 'flagged')),
+                    source TEXT NOT NULL
+                        CHECK(source IN ('human_defined', 'observed_pattern', 'dream_inferred', 'skill_composed')),
+                    procedure_confidence REAL NOT NULL
+                        CHECK(procedure_confidence >= 0.0 AND procedure_confidence <= 1.0),
+                    required_permission TEXT NOT NULL
+                        CHECK(required_permission IN ('observe', 'suggest', 'ask_approval', 'execute')),
+                    trigger_phrases TEXT NOT NULL,
+                    definition_json TEXT NOT NULL,
+                    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                    archived_at TEXT,
+                    UNIQUE(normalized_name, version)
+                )
+                """
+            )
+            connection.execute(
+                """
+                CREATE UNIQUE INDEX IF NOT EXISTS idx_procedures_one_active_name
+                ON procedures(normalized_name)
+                WHERE status = 'active'
+                """
+            )
+            connection.execute(
+                """
+                CREATE TABLE IF NOT EXISTS procedure_executions (
+                    execution_id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    procedure_id INTEGER NOT NULL,
+                    procedure_version INTEGER NOT NULL,
+                    status TEXT NOT NULL DEFAULT 'recorded'
+                        CHECK(status IN ('recorded', 'completed', 'failed', 'cancelled')),
+                    started_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                    completed_at TEXT,
+                    outcome TEXT,
+                    FOREIGN KEY(procedure_id) REFERENCES procedures(procedure_id)
+                )
+                """
+            )
+            connection.execute(
+                """
+                CREATE TABLE IF NOT EXISTS pending_procedures (
+                    pending_id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    normalized_name TEXT NOT NULL,
+                    status TEXT NOT NULL DEFAULT 'pending'
+                        CHECK(status IN ('pending', 'approved', 'rejected')),
+                    proposal_json TEXT NOT NULL,
+                    submitted_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                    reviewed_at TEXT,
+                    review_note TEXT,
+                    approved_procedure_id INTEGER,
+                    FOREIGN KEY(approved_procedure_id) REFERENCES procedures(procedure_id)
+                )
+                """
+            )
             connection.commit()
 
     @staticmethod

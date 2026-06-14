@@ -16,6 +16,7 @@ Create a safe, affordable personal robotic assistant capable of perception, memo
 - [x] Safe Skills Registry
 - [x] Adaptive State Engine
 - [x] Dreaming Foundation
+- [x] Procedural Memory Foundation
 - [ ] External Tool Use
 - [ ] Rover Platform
 - [ ] Object Manipulation
@@ -39,6 +40,8 @@ Phase 5 adds GrimBot Skills Registry v0.6: safe internal butler skills with perm
 Phase 6 adds GrimBot Adaptive State v0.7: SQLite-backed state signals that influence attention, memory priority, skill suggestion, and Maya response style without adding emotions, consciousness, ML training, motors, or autonomous execution.
 
 Phase 7 adds GrimBot Dreaming Foundation v0.8: manual rule-based reflection, protected forgetting, candidate semantic facts, human promotion review, and auditable dream-cycle logs.
+
+Phase 8 adds GrimBot Procedural Memory v0.9: strict procedure schemas, immutable version history, pending proposal review, passive execution statistics, and deterministic matching without procedure execution.
 
 LLM output is never connected directly to motors. Every movement command must pass through `brain/grimbot_brain/safety.py`.
 
@@ -328,6 +331,31 @@ POST /dream/promotions/{id}/reject
 Dream cycles are manual only. They read episodic memories and may write candidate semantic facts, promotion records, and dream logs. Pending and rejected facts are quarantined from active robot-memory retrieval. Only human-approved or anchored facts become available to normal recall.
 
 Dreaming never modifies `safety.py`, adaptive state, skills, actions, motors, or live episodic memory. There is no idle-time trigger, automatic dreaming, or automatic promotion.
+
+## Procedural Memory
+
+Procedural memory stores ordered, reviewable sequences:
+
+- A skill is one atomic capability.
+- A procedure is an ordered sequence of steps.
+- A workflow is a procedure with branches.
+
+v0.9 stores and matches procedures but cannot execute them. It has no procedure execution endpoint and cannot invoke skills, actions, motors, external tools, adaptive state, or safety changes.
+
+Procedure endpoints:
+
+```text
+GET /procedures
+GET /procedures/{procedure_id}
+GET /procedures/pending
+POST /procedures/pending/{pending_id}/approve
+POST /procedures/pending/{pending_id}/reject
+POST /procedures/match
+```
+
+Active procedures are returned by default. Updates archive the previous version and create a new immutable version. Pending proposals require explicit human approval or rejection. Matching uses exact IDs, normalized names, and conservative standard-library fuzzy trigger matching.
+
+Design details: [`docs/procedural_memory_design.md`](docs/procedural_memory_design.md)
 
 ## Test
 
