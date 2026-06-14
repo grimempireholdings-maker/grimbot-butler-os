@@ -279,4 +279,63 @@ class BrainMemory:
                 )
                 """
             )
+            self._ensure_column(connection, "episodic_memories", "consolidated", "INTEGER NOT NULL DEFAULT 0")
+            self._ensure_column(connection, "episodic_memories", "anchor", "INTEGER NOT NULL DEFAULT 0")
+            self._ensure_column(connection, "semantic_facts", "created_at", "TEXT")
+            self._ensure_column(connection, "semantic_facts", "last_reinforced", "TEXT")
+            self._ensure_column(connection, "semantic_facts", "tags", "TEXT NOT NULL DEFAULT '[]'")
+            self._ensure_column(connection, "semantic_facts", "tier", "TEXT NOT NULL DEFAULT 'semantic'")
+            connection.execute(
+                """
+                UPDATE semantic_facts
+                SET created_at = COALESCE(created_at, first_seen),
+                    last_reinforced = COALESCE(last_reinforced, last_seen),
+                    tags = COALESCE(tags, '[]'),
+                    tier = CASE WHEN tier = 'core' THEN 'core' ELSE 'semantic' END
+                """
+            )
+            connection.execute(
+                """
+                CREATE TABLE IF NOT EXISTS promotion_queue (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    fact_id INTEGER NOT NULL UNIQUE,
+                    status TEXT NOT NULL DEFAULT 'pending'
+                        CHECK(status IN ('pending', 'approved', 'rejected', 'anchor')),
+                    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                    reviewed_at TEXT,
+                    review_note TEXT,
+                    FOREIGN KEY(fact_id) REFERENCES semantic_facts(id)
+                )
+                """
+            )
+            connection.execute(
+                """
+                CREATE TABLE IF NOT EXISTS dream_cycles (
+                    dream_id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    started_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                    completed_at TEXT,
+                    episodes_processed INTEGER NOT NULL DEFAULT 0,
+                    facts_created INTEGER NOT NULL DEFAULT 0,
+                    facts_forgotten INTEGER NOT NULL DEFAULT 0,
+                    contradictions_flagged INTEGER NOT NULL DEFAULT 0,
+                    status TEXT NOT NULL DEFAULT 'running'
+                        CHECK(status IN ('running', 'completed', 'failed')),
+                    error_message TEXT
+                )
+                """
+            )
             connection.commit()
+
+    @staticmethod
+    def _ensure_column(
+        connection: sqlite3.Connection,
+        table: str,
+        column: str,
+        definition: str,
+    ) -> None:
+        columns = {
+            row[1]
+            for row in connection.execute(f"PRAGMA table_info({table})").fetchall()
+        }
+        if column not in columns:
+            connection.execute(f"ALTER TABLE {table} ADD COLUMN {column} {definition}")

@@ -38,17 +38,24 @@
 
 ## Phase 7
 
-- [ ] External Tool Use
+- [x] Manual Dream Cycles
+- [x] Rule-Based Memory Consolidation
+- [x] Human-Reviewed Fact Promotion
+- [x] Protected Forgetting
 
 ## Phase 8
 
-- [ ] Rover Hardware
+- [ ] External Tool Use
 
 ## Phase 9
 
-- [ ] Manipulation
+- [ ] Rover Hardware
 
 ## Phase 10
+
+- [ ] Manipulation
+
+## Phase 11
 
 - [ ] Synth Platform
 

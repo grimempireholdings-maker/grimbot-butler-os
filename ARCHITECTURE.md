@@ -191,3 +191,26 @@ POST /state/event
 POST /state/decay
 POST /state/reset
 ```
+
+## Current Dreaming Flow
+
+v0.8 adds a manual reflection pipeline. Dreaming is not a live reaction system, an autonomous learner, or a self-modification mechanism.
+
+1. A human explicitly calls `POST /dream/run`.
+2. The rule-based provider reads a bounded snapshot of unconsolidated episodic memories.
+3. The consolidator clusters repeated observations by normalized content, room, zone, action, outcome, object, and hazard tags.
+4. Candidate semantic facts are created or reinforced.
+5. New candidates enter `promotion_queue` as `pending`.
+6. Pending and rejected candidates remain excluded from active robot-memory retrieval.
+7. A human approves, rejects, or anchors a candidate through a review endpoint.
+8. Every run writes an auditable `dream_cycles` record.
+
+The forgetting subsystem scores semantic facts using importance, frequency, and recency. It never removes core facts, safety-related facts, approved facts, anchored facts, or facts awaiting review. Episodic memories are read-only during dream cycles.
+
+Dreaming writes only:
+
+- `semantic_facts`
+- `promotion_queue`
+- `dream_cycles`
+
+Dreaming does not modify adaptive state, execute skills, issue actions, control motors, or bypass `safety.py`. There are no automatic, scheduled, or idle-time dream triggers.
