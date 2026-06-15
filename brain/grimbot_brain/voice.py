@@ -49,7 +49,7 @@ def approved_audio_path(audio_path: str | None, audio_dir: str | Path | None = N
 def speech_to_text(mock_transcript: str | None = None, audio_path: str | None = None) -> SpeechToTextResult:
     mock_enabled = os.getenv("GRIMBOT_VOICE_MOCK", "true").lower() != "false"
     if mock_enabled:
-        transcript = _safe_transcript(mock_transcript, fallback="what should I clean first?")
+        transcript = _safe_transcript(mock_transcript, fallback="input unavailable")
         return SpeechToTextResult(transcript=transcript, mode="mock", source="mock_transcript")
 
     approved = approved_audio_path(audio_path)

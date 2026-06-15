@@ -65,6 +65,8 @@ def _cleanup_coaching_text(request: MayaComposeRequest, permission: str) -> str:
 
 
 def _extract_summary(raw_output: dict) -> str:
+    if "context_summary" in raw_output and raw_output["context_summary"]:
+        return str(raw_output["context_summary"])
     if "room_summary" in raw_output:
         return str(raw_output["room_summary"])
     if isinstance(raw_output.get("data"), dict) and "room_summary" in raw_output["data"]:

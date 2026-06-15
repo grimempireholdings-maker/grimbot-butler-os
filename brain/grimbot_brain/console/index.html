@@ -1,0 +1,219 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Maya Console</title>
+  <link rel="icon" href="data:,">
+  <link rel="stylesheet" href="/console/assets/console.css">
+</head>
+<body>
+  <header class="topbar">
+    <div>
+      <p class="eyebrow">GrimBot Butler OS</p>
+      <h1>Maya Console</h1>
+    </div>
+    <div class="system-status">
+      <span id="health-dot" class="status-dot" aria-hidden="true"></span>
+      <span id="health-label">Connecting</span>
+      <button id="refresh-all" class="icon-button" type="button" title="Refresh all read-only panels" aria-label="Refresh all read-only panels">&#8635;</button>
+    </div>
+  </header>
+
+  <main class="console-grid">
+    <section class="panel chat-panel" aria-labelledby="chat-title">
+      <div class="panel-heading">
+        <div>
+          <p class="section-kicker">Conversation</p>
+          <h2 id="chat-title">Chat with Maya</h2>
+        </div>
+        <span class="mode-label">Push to talk simulation</span>
+      </div>
+      <div id="chat-log" class="chat-log" aria-live="polite">
+        <div class="empty-state">Maya is ready.</div>
+      </div>
+      <form id="chat-form" class="composer">
+        <label class="sr-only" for="chat-input">Message Maya</label>
+        <textarea id="chat-input" maxlength="1000" rows="3" placeholder="Message Maya..." required></textarea>
+        <div class="composer-actions">
+          <select id="chat-mode" aria-label="Assistant mode">
+            <option value="maya_chief_of_staff">Maya Chief of Staff</option>
+            <option value="neutral_robot">Neutral Robot</option>
+            <option value="quiet_observer">Quiet Observer</option>
+          </select>
+          <button class="primary-button" type="submit">Send</button>
+        </div>
+      </form>
+    </section>
+
+    <section class="panel briefing-panel" aria-labelledby="briefing-title">
+      <div class="panel-heading">
+        <div>
+          <p class="section-kicker">Command view</p>
+          <h2 id="briefing-title">Maya Briefing</h2>
+        </div>
+        <button id="generate-briefing" class="secondary-button" type="button">Generate Briefing</button>
+      </div>
+      <div id="briefing-output" class="stacked-output">
+        <div class="empty-state">No briefing generated.</div>
+      </div>
+    </section>
+
+    <section class="panel wide-panel" aria-labelledby="context-title">
+      <div class="panel-heading">
+        <div>
+          <p class="section-kicker">Chief of Staff context</p>
+          <h2 id="context-title">Julian's Operating Context</h2>
+        </div>
+        <button class="icon-button panel-refresh" data-refresh="context" type="button" title="Refresh context" aria-label="Refresh context">&#8635;</button>
+      </div>
+      <div class="context-columns">
+        <div><h3>Top Priorities</h3><div id="context-priorities" class="item-list"></div></div>
+        <div><h3>Active Projects</h3><div id="context-projects" class="item-list"></div></div>
+        <div><h3>Current Bottlenecks</h3><div id="context-bottlenecks" class="item-list"></div></div>
+        <div><h3>Next Actions</h3><div id="context-actions" class="item-list"></div></div>
+      </div>
+      <div class="context-controls">
+        <form id="context-search-form">
+          <label class="field-label" for="context-search">Search context</label>
+          <div class="control-row">
+            <input id="context-search" maxlength="500" placeholder="Search projects, priorities, people, or decisions..." required>
+            <button class="secondary-button" type="submit">Search</button>
+          </div>
+          <div id="context-search-result" class="result-box compact"><div class="empty-state">No context search yet.</div></div>
+        </form>
+        <form id="context-remember-form">
+          <label class="field-label" for="context-remember">Remember this</label>
+          <div class="control-row">
+            <select id="context-type" aria-label="Context type">
+              <option value="decision">Decision</option>
+              <option value="priority">Priority</option>
+              <option value="current_bottleneck">Current Bottleneck</option>
+              <option value="next_action">Next Action</option>
+              <option value="project">Project Note</option>
+              <option value="relationship">Relationship</option>
+              <option value="protocol">Protocol</option>
+              <option value="belief">Belief</option>
+            </select>
+            <input id="context-name" maxlength="160" placeholder="Short name" required>
+          </div>
+          <textarea id="context-remember" maxlength="2000" rows="3" placeholder="Context to remember..." required></textarea>
+          <div class="form-footer">
+            <label class="check-label"><input id="context-verified" type="checkbox"> Verified by Julian</label>
+            <button class="secondary-button" type="submit">Remember</button>
+          </div>
+        </form>
+      </div>
+    </section>
+
+    <section class="panel state-panel" aria-labelledby="state-title">
+      <div class="panel-heading">
+        <div>
+          <p class="section-kicker">Adaptive pressure</p>
+          <h2 id="state-title">Internal State</h2>
+        </div>
+        <button class="icon-button panel-refresh" data-refresh="state" type="button" title="Refresh state" aria-label="Refresh state">&#8635;</button>
+      </div>
+      <div id="state-output" class="signal-grid"><div class="empty-state">Loading state...</div></div>
+    </section>
+
+    <section class="panel skills-panel" aria-labelledby="skills-title">
+      <div class="panel-heading">
+        <div>
+          <p class="section-kicker">Manual capabilities</p>
+          <h2 id="skills-title">Skills</h2>
+        </div>
+        <button class="icon-button panel-refresh" data-refresh="skills" type="button" title="Refresh skills" aria-label="Refresh skills">&#8635;</button>
+      </div>
+      <form id="skill-form" class="control-row">
+        <label class="sr-only" for="skill-select">Select skill</label>
+        <select id="skill-select" required><option value="">Loading skills...</option></select>
+        <select id="skill-permission" aria-label="Permission">
+          <option value="suggest">Suggest</option>
+          <option value="observe">Observe</option>
+          <option value="ask_approval">Ask Approval</option>
+          <option value="execute">Execute</option>
+        </select>
+        <button class="secondary-button" type="submit">Run Skill</button>
+      </form>
+      <label class="field-label" for="skill-inputs">Inputs JSON</label>
+      <textarea id="skill-inputs" class="code-input" rows="3">{}</textarea>
+      <div id="skills-output" class="result-box"><div class="empty-state">Select a skill to inspect it.</div></div>
+    </section>
+
+    <section class="panel wide-panel" aria-labelledby="dream-title">
+      <div class="panel-heading">
+        <div>
+          <p class="section-kicker">Human-reviewed reflection</p>
+          <h2 id="dream-title">Dreaming</h2>
+        </div>
+        <div class="button-group">
+          <button class="icon-button panel-refresh" data-refresh="dream" type="button" title="Refresh dreaming data" aria-label="Refresh dreaming data">&#8635;</button>
+          <button id="run-dream" class="secondary-button" type="button">Run Dream Cycle</button>
+        </div>
+      </div>
+      <div class="split-view">
+        <div>
+          <h3>Facts</h3>
+          <div id="dream-facts" class="item-list"><div class="empty-state">Loading facts...</div></div>
+        </div>
+        <div>
+          <h3>Promotion Review</h3>
+          <div id="dream-promotions" class="item-list"><div class="empty-state">Loading promotions...</div></div>
+        </div>
+      </div>
+      <div id="dream-result" class="inline-notice" hidden></div>
+    </section>
+
+    <section class="panel wide-panel" aria-labelledby="procedure-title">
+      <div class="panel-heading">
+        <div>
+          <p class="section-kicker">Storage and matching only</p>
+          <h2 id="procedure-title">Procedural Memory</h2>
+        </div>
+        <button class="icon-button panel-refresh" data-refresh="procedures" type="button" title="Refresh procedures" aria-label="Refresh procedures">&#8635;</button>
+      </div>
+      <form id="procedure-match-form" class="control-row">
+        <label class="sr-only" for="procedure-query">Test procedure matching</label>
+        <input id="procedure-query" maxlength="500" placeholder="Test a procedure trigger..." required>
+        <button class="secondary-button" type="submit">Match Only</button>
+      </form>
+      <div id="procedure-match-result" class="result-box compact"><div class="empty-state">No match tested.</div></div>
+      <div class="split-view">
+        <div>
+          <h3>Active Procedures</h3>
+          <div id="procedures-list" class="item-list"><div class="empty-state">Loading procedures...</div></div>
+        </div>
+        <div>
+          <h3>Pending Review</h3>
+          <div id="procedures-pending" class="item-list"><div class="empty-state">Loading proposals...</div></div>
+        </div>
+      </div>
+    </section>
+
+    <section class="panel wide-panel" aria-labelledby="memory-title">
+      <div class="panel-heading">
+        <div>
+          <p class="section-kicker">Robot recall</p>
+          <h2 id="memory-title">Memory</h2>
+        </div>
+        <button class="icon-button panel-refresh" data-refresh="memory" type="button" title="Refresh memory" aria-label="Refresh memory">&#8635;</button>
+      </div>
+      <form id="memory-query-form" class="control-row">
+        <label class="sr-only" for="memory-query">Search relevant memory</label>
+        <input id="memory-query" maxlength="500" placeholder="Ask what Maya remembers..." required>
+        <button class="secondary-button" type="submit">Recall</button>
+      </form>
+      <div id="memory-relevant" class="result-box compact"><div class="empty-state">No recall query yet.</div></div>
+      <div class="memory-columns">
+        <div><h3>Rooms</h3><div id="memory-rooms" class="item-list"></div></div>
+        <div><h3>Hazards</h3><div id="memory-hazards" class="item-list"></div></div>
+        <div><h3>Mess Zones</h3><div id="memory-mess" class="item-list"></div></div>
+      </div>
+    </section>
+  </main>
+
+  <div id="toast" class="toast" role="status" aria-live="polite" hidden></div>
+  <script src="/console/assets/console.js" defer></script>
+</body>
+</html>

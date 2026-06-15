@@ -385,6 +385,124 @@ class BrainMemory:
                 )
                 """
             )
+            connection.execute(
+                """
+                CREATE TABLE IF NOT EXISTS identity_context (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    context_type TEXT NOT NULL
+                        CHECK(context_type IN (
+                            'person_profile', 'mission', 'venture', 'project',
+                            'priority', 'relationship', 'decision', 'constraint',
+                            'protocol', 'belief', 'current_bottleneck', 'next_action'
+                        )),
+                    normalized_name TEXT NOT NULL,
+                    name TEXT NOT NULL,
+                    content TEXT NOT NULL,
+                    priority INTEGER NOT NULL DEFAULT 50
+                        CHECK(priority >= 0 AND priority <= 100),
+                    source TEXT NOT NULL
+                        CHECK(source IN ('julian_prime', 'maya', 'grimbot', 'board', 'portfolio_seed')),
+                    verified INTEGER NOT NULL DEFAULT 0 CHECK(verified IN (0, 1)),
+                    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                    last_updated TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                    UNIQUE(context_type, normalized_name)
+                )
+                """
+            )
+            connection.execute(
+                """
+                CREATE TABLE IF NOT EXISTS identity_projects (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    normalized_name TEXT NOT NULL UNIQUE,
+                    name TEXT NOT NULL,
+                    status TEXT NOT NULL
+                        CHECK(status IN ('active', 'building', 'experiment', 'archived', 'paused')),
+                    priority INTEGER NOT NULL
+                        CHECK(priority >= 0 AND priority <= 100),
+                    current_bottleneck TEXT NOT NULL,
+                    next_action TEXT NOT NULL,
+                    related_entities TEXT NOT NULL DEFAULT '[]',
+                    source TEXT NOT NULL
+                        CHECK(source IN ('julian_prime', 'maya', 'grimbot', 'board', 'portfolio_seed')),
+                    verified INTEGER NOT NULL DEFAULT 0 CHECK(verified IN (0, 1)),
+                    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                    last_updated TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+                )
+                """
+            )
+            from .identity.default_seed import CONTEXT_SEED, PROJECT_SEED
+
+            for context_type, name, content, priority in CONTEXT_SEED:
+                normalized_name = " ".join(
+                    part for part in "".join(
+                        character.lower() if character.isalnum() else " "
+                        for character in name
+                    ).split()
+                )
+                connection.execute(
+                    """
+                    INSERT INTO identity_context
+                        (context_type, normalized_name, name, content, priority, source, verified)
+                    VALUES (?, ?, ?, ?, ?, 'portfolio_seed', 1)
+                    ON CONFLICT(context_type, normalized_name) DO UPDATE SET
+                        name = excluded.name,
+                        content = excluded.content,
+                        priority = excluded.priority,
+                        verified = excluded.verified,
+                        last_updated = CURRENT_TIMESTAMP
+                    WHERE identity_context.source = 'portfolio_seed'
+                      AND (
+                          identity_context.name != excluded.name
+                          OR identity_context.content != excluded.content
+                          OR identity_context.priority != excluded.priority
+                          OR identity_context.verified != excluded.verified
+                      )
+                    """,
+                    (context_type, normalized_name, name, content, priority),
+                )
+            for project in PROJECT_SEED:
+                normalized_name = " ".join(
+                    part for part in "".join(
+                        character.lower() if character.isalnum() else " "
+                        for character in project["name"]
+                    ).split()
+                )
+                connection.execute(
+                    """
+                    INSERT INTO identity_projects
+                        (normalized_name, name, status, priority, current_bottleneck,
+                         next_action, related_entities, source, verified)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, 'portfolio_seed', 1)
+                    ON CONFLICT(normalized_name) DO UPDATE SET
+                        name = excluded.name,
+                        status = excluded.status,
+                        priority = excluded.priority,
+                        current_bottleneck = excluded.current_bottleneck,
+                        next_action = excluded.next_action,
+                        related_entities = excluded.related_entities,
+                        verified = excluded.verified,
+                        last_updated = CURRENT_TIMESTAMP
+                    WHERE identity_projects.source = 'portfolio_seed'
+                      AND (
+                          identity_projects.name != excluded.name
+                          OR identity_projects.status != excluded.status
+                          OR identity_projects.priority != excluded.priority
+                          OR identity_projects.current_bottleneck != excluded.current_bottleneck
+                          OR identity_projects.next_action != excluded.next_action
+                          OR identity_projects.related_entities != excluded.related_entities
+                          OR identity_projects.verified != excluded.verified
+                      )
+                    """,
+                    (
+                        normalized_name,
+                        project["name"],
+                        project["status"],
+                        project["priority"],
+                        project["current_bottleneck"],
+                        project["next_action"],
+                        json.dumps(project["related_entities"]),
+                    ),
+                )
             connection.commit()
 
     @staticmethod

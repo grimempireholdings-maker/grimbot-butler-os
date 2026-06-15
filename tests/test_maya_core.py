@@ -80,6 +80,9 @@ def test_maya_briefing_structure(tmp_path, monkeypatch) -> None:
     assert briefing.fyi
     assert briefing.hazards == ["loose cord on floor"]
     assert briefing.next_best_action == "clear hazard: loose cord on floor"
+    assert briefing.active_projects[0].startswith("Real Estate Acquisitions")
+    assert briefing.current_bottlenecks
+    assert briefing.next_actions
     assert briefing.permission == "suggest"
 
 
@@ -149,8 +152,8 @@ def test_empty_maya_briefing_has_stable_structure(tmp_path) -> None:
         RobotMemory(BrainMemory(tmp_path / "memory.sqlite3")),
     )
 
-    assert briefing.priority_items == ["scan room for current conditions"]
-    assert briefing.fyi == ["No recurring room context yet."]
-    assert briefing.wins == []
+    assert "Stabilize cash flow" in briefing.priority_items[0]
+    assert briefing.fyi
+    assert briefing.wins
     assert briefing.hazards == []
     assert briefing.next_best_action == "scan room for current conditions"

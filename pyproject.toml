@@ -1,7 +1,7 @@
 [project]
 name = "grimbot-brain"
-version = "0.9.0"
-description = "GrimBot Butler OS: modular robot brain with versioned, non-executable procedural memory."
+version = "0.10.1"
+description = "GrimBot Butler OS: Maya Chief of Staff context with a local operator console."
 readme = "README.md"
 requires-python = ">=3.10"
 dependencies = [
@@ -36,3 +36,6 @@ package-dir = {"" = "brain"}
 
 [tool.setuptools.packages.find]
 where = ["brain"]
+
+[tool.setuptools.package-data]
+grimbot_brain = ["console/*"]

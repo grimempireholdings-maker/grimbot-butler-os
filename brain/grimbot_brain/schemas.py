@@ -232,6 +232,9 @@ class MayaBriefing(BaseModel):
     fyi: list[str] = Field(default_factory=list, max_length=10)
     wins: list[str] = Field(default_factory=list, max_length=10)
     hazards: list[str] = Field(default_factory=list, max_length=10)
+    active_projects: list[str] = Field(default_factory=list, max_length=10)
+    current_bottlenecks: list[str] = Field(default_factory=list, max_length=10)
+    next_actions: list[str] = Field(default_factory=list, max_length=10)
     next_best_action: str = Field(min_length=1, max_length=500)
 
 

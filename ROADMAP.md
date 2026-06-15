@@ -52,17 +52,29 @@
 
 ## Phase 9
 
-- [ ] External Tool Use
+- [x] Local Maya Console
+- [x] Manual Review Workflows
+- [x] Read-Only Operator Dashboard
 
 ## Phase 10
 
-- [ ] Rover Hardware
+- [x] Chief of Staff Identity Context
+- [x] Project-Aware Briefings
+- [x] Context Search and Recall
 
 ## Phase 11
 
-- [ ] Manipulation
+- [ ] External Tool Use
 
 ## Phase 12
+
+- [ ] Rover Hardware
+
+## Phase 13
+
+- [ ] Manipulation
+
+## Phase 14
 
 - [ ] Synth Platform
 
