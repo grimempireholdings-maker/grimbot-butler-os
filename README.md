@@ -17,6 +17,8 @@ Create a safe, affordable personal robotic assistant capable of perception, memo
 - [x] Adaptive State Engine
 - [x] Dreaming Foundation
 - [x] Procedural Memory Foundation
+- [x] Maya Console
+- [x] Chief of Staff Context
 - [ ] External Tool Use
 - [ ] Rover Platform
 - [ ] Object Manipulation
@@ -42,6 +44,10 @@ Phase 6 adds GrimBot Adaptive State v0.7: SQLite-backed state signals that influ
 Phase 7 adds GrimBot Dreaming Foundation v0.8: manual rule-based reflection, protected forgetting, candidate semantic facts, human promotion review, and auditable dream-cycle logs.
 
 Phase 8 adds GrimBot Procedural Memory v0.9: strict procedure schemas, immutable version history, pending proposal review, passive execution statistics, and deterministic matching without procedure execution.
+
+Phase 9 adds Maya Console v0.10: a local operator interface for conversation, briefings, adaptive state, skills, dreaming review, procedural memory review, and robot memory inspection.
+
+Phase 10 adds Maya Chief of Staff Context v0.10.1: structured personal and business context for Julian, his ventures, active projects, priorities, relationships, bottlenecks, protocols, and next actions.
 
 LLM output is never connected directly to motors. Every movement command must pass through `brain/grimbot_brain/safety.py`.
 
@@ -84,6 +90,24 @@ Local API docs:
 ```text
 http://127.0.0.1:8000/docs
 ```
+
+## Run Maya Console
+
+Start the existing brain server:
+
+```powershell
+uvicorn grimbot_brain.main:app --reload
+```
+
+Open:
+
+```text
+http://127.0.0.1:8000/console
+```
+
+The console loads state, skills, dream facts, procedure records, and robot memory through read-only requests. Chat, briefings, skill runs, dream cycles, review decisions, procedure matching, and memory recall occur only after an explicit operator action.
+
+The console does not add autonomous execution, procedure execution, motors, hardware control, external tools, or automatic approval. Skill permissions and all existing safety boundaries remain authoritative.
 
 ## Run CLI Demo
 
@@ -356,6 +380,38 @@ POST /procedures/match
 Active procedures are returned by default. Updates archive the previous version and create a new immutable version. Pending proposals require explicit human approval or rejection. Matching uses exact IDs, normalized names, and conservative standard-library fuzzy trigger matching.
 
 Design details: [`docs/procedural_memory_design.md`](docs/procedural_memory_design.md)
+
+## Maya Console
+
+Maya Console is a lightweight FastAPI-served HTML, CSS, and JavaScript interface. It uses existing structured API contracts and keeps Maya text, machine output, review decisions, and passive memory inspection visibly separate.
+
+Design details: [`docs/maya_console_design.md`](docs/maya_console_design.md)
+
+## Chief of Staff Context
+
+Maya is Julian's Chief of Staff first and a room assistant second. v0.10.1 adds SQLite-backed context for:
+
+- Julian's profile, mission, beliefs, constraints, and protocols
+- Grim Empire Holdings LLC and the active venture portfolio
+- project status, priority, bottleneck, next action, and related entities
+- source separation between Julian Prime, Maya, GrimBot, the Board, and the portfolio seed
+- explicit verified and unverified context
+
+Context endpoints:
+
+```text
+GET /context
+GET /context/projects
+GET /context/priorities
+GET /context/relationships
+POST /context/search
+POST /context/remember
+POST /context/update-priority
+```
+
+Maya briefings rank life and business priorities, active projects, bottlenecks, and next actions before room information. Conversation only defaults to robot memory for explicitly physical questions such as rooms, cleaning, vision, hazards, sensors, or movement.
+
+Design details: [`docs/chief_of_staff_context_design.md`](docs/chief_of_staff_context_design.md)
 
 ## Test
 

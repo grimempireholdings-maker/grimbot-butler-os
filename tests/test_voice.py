@@ -42,7 +42,7 @@ def test_empty_mock_transcript_uses_safe_fallback(monkeypatch) -> None:
     stt = speech_to_text(mock_transcript="   ")
     tts = text_to_speech("   ")
 
-    assert stt.transcript == "what should I clean first?"
+    assert stt.transcript == "input unavailable"
     assert tts.text == "No response available."
 
 

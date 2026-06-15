@@ -157,7 +157,6 @@ class AdaptiveState:
         now = _format_time(_now())
         with self._connect() as connection:
             rows = connection.execute("SELECT * FROM adaptive_state_signals").fetchall()
-            existing = {row["name"] for row in rows if row["name"] in SIGNALS}
             for row in rows:
                 if row["name"] not in SIGNALS:
                     connection.execute("DELETE FROM adaptive_state_signals WHERE name = ?", (row["name"],))
@@ -184,32 +183,27 @@ class AdaptiveState:
                         row["name"],
                     ),
                 )
+            for name, definition in SIGNALS.items():
+                connection.execute(
+                    """
+                    INSERT INTO adaptive_state_signals
+                        (name, current_value, min_value, max_value, baseline, decay_rate, last_updated, source, reason)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    ON CONFLICT(name) DO NOTHING
+                    """,
+                    (
+                        name,
+                        definition.baseline,
+                        definition.min_value,
+                        definition.max_value,
+                        definition.baseline,
+                        definition.decay_rate,
+                        now,
+                        "initialize",
+                        "initialized missing adaptive state signal",
+                    ),
+                )
             connection.commit()
-
-        missing = set(SIGNALS) - existing
-        if missing:
-            with self._connect() as connection:
-                for name in missing:
-                    definition = SIGNALS[name]
-                    connection.execute(
-                        """
-                        INSERT INTO adaptive_state_signals
-                            (name, current_value, min_value, max_value, baseline, decay_rate, last_updated, source, reason)
-                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-                        """,
-                        (
-                            name,
-                            definition.baseline,
-                            definition.min_value,
-                            definition.max_value,
-                            definition.baseline,
-                            definition.decay_rate,
-                            now,
-                            "initialize",
-                            "initialized missing adaptive state signal",
-                        ),
-                    )
-                connection.commit()
 
     def _event_deltas(self, request: StateEventRequest) -> dict[StateSignalName, float]:
         intensity = request.intensity

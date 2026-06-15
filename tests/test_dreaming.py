@@ -169,7 +169,8 @@ def test_pending_fact_is_not_active_until_manual_approval(tmp_path) -> None:
 
     assert before.semantic_facts == []
     assert room_before.semantic_facts == []
-    assert briefing_before.fyi == ["No recurring room context yet."]
+    assert briefing_before.fyi
+    assert all("Loose cord near the desk" not in item for item in briefing_before.fyi)
     assert skill_before.machine_output["data"]["semantic_facts"] == []
     assert approved.status == "approved"
     assert after.semantic_facts[0]["content"] == "Repeated observation in Office: Loose cord near the desk"

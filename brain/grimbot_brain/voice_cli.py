@@ -13,7 +13,7 @@ from .schemas import VoiceConversationRequest
 def main() -> None:
     parser = argparse.ArgumentParser(description="Run a push-to-talk GrimBot voice conversation.")
     parser.add_argument("--push-to-talk", action="store_true")
-    parser.add_argument("--mock-transcript", default="what should I clean first?")
+    parser.add_argument("--mock-transcript", default="How's my day looking?")
     parser.add_argument("--audio-path", default=None)
     parser.add_argument("--room-name", default=None)
     parser.add_argument("--zone-name", default=None)

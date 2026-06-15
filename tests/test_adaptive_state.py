@@ -1,5 +1,6 @@
 import math
 import sqlite3
+from concurrent.futures import ThreadPoolExecutor
 
 from grimbot_brain.adaptive_state import AdaptiveState
 from grimbot_brain.memory import BrainMemory
@@ -35,6 +36,17 @@ def test_state_initialization_creates_all_signals(tmp_path) -> None:
     }
     assert state.values["urgency"] == 0.2
     assert state.next_best_action == "continue normal observation and suggestion"
+
+
+def test_state_initialization_is_safe_under_parallel_requests(tmp_path) -> None:
+    memory = BrainMemory(tmp_path / "memory.sqlite3")
+
+    with ThreadPoolExecutor(max_workers=8) as pool:
+        snapshots = list(pool.map(lambda _: AdaptiveState(memory).snapshot(), range(16)))
+
+    assert all(len(snapshot.signals) == 8 for snapshot in snapshots)
+    with sqlite3.connect(memory.db_path) as connection:
+        assert connection.execute("SELECT COUNT(*) FROM adaptive_state_signals").fetchone()[0] == 8
 
 
 def test_state_persists_across_instances(tmp_path) -> None:

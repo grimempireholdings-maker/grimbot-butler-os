@@ -1,7 +1,11 @@
 from __future__ import annotations
 
+from pathlib import Path
+
 from dotenv import load_dotenv
 from fastapi import FastAPI, HTTPException, Query
+from fastapi.responses import FileResponse
+from fastapi.staticfiles import StaticFiles
 
 from .adaptive_state import AdaptiveState
 from .conversation import run_voice_conversation
@@ -15,6 +19,16 @@ from .dreaming.dream_schemas import (
     SemanticFact,
 )
 from .dreaming.dreaming_engine import DreamCycleConflictError, DreamingEngine
+from .identity.context_schemas import (
+    ContextEntry,
+    ContextRememberRequest,
+    ContextSearchRequest,
+    ContextSearchResult,
+    ContextSummary,
+    PriorityUpdateRequest,
+    ProjectContext,
+)
+from .identity.context_store import ContextStore
 from .maya_core import build_maya_briefing
 from .memory import BrainMemory
 from .procedural_memory.procedure_matcher import ProcedureMatcher
@@ -59,8 +73,16 @@ from .schemas import (
 
 load_dotenv()
 
-app = FastAPI(title="GrimBot Butler OS Brain", version="0.9.0")
+CONSOLE_DIR = Path(__file__).resolve().parent / "console"
+
+app = FastAPI(title="GrimBot Butler OS Brain", version="0.10.1")
+app.mount("/console/assets", StaticFiles(directory=CONSOLE_DIR), name="console-assets")
 memory = BrainMemory()
+
+
+@app.get("/console", response_class=FileResponse, include_in_schema=False)
+def console_page() -> FileResponse:
+    return FileResponse(CONSOLE_DIR / "index.html", media_type="text/html")
 
 
 @app.get("/health")
@@ -128,6 +150,44 @@ def memory_relevant(request: RelevantMemoryRequest) -> RelevantMemoryResult:
     return RobotMemory(memory).relevant(request)
 
 
+@app.get("/context", response_model=ContextSummary)
+def context_get() -> ContextSummary:
+    return ContextStore(memory).summary()
+
+
+@app.get("/context/projects", response_model=list[ProjectContext])
+def context_projects() -> list[ProjectContext]:
+    return ContextStore(memory).projects()
+
+
+@app.get("/context/priorities", response_model=list[ContextEntry])
+def context_priorities() -> list[ContextEntry]:
+    return ContextStore(memory).priorities()
+
+
+@app.get("/context/relationships", response_model=list[ContextEntry])
+def context_relationships() -> list[ContextEntry]:
+    return ContextStore(memory).relationships()
+
+
+@app.post("/context/search", response_model=ContextSearchResult)
+def context_search(request: ContextSearchRequest) -> ContextSearchResult:
+    return ContextStore(memory).search(request)
+
+
+@app.post("/context/remember", response_model=ContextEntry)
+def context_remember(request: ContextRememberRequest) -> ContextEntry:
+    return ContextStore(memory).remember(request)
+
+
+@app.post("/context/update-priority", response_model=ProjectContext)
+def context_update_priority(request: PriorityUpdateRequest) -> ProjectContext:
+    try:
+        return ContextStore(memory).update_priority(request)
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail=exc.args[0]) from exc
+
+
 @app.post("/maya/compose", response_model=MayaComposedResponse)
 def maya_compose(request: MayaComposeRequest) -> MayaComposedResponse:
     if request.adaptive_state is None:
@@ -137,7 +197,7 @@ def maya_compose(request: MayaComposeRequest) -> MayaComposedResponse:
 
 @app.post("/maya/briefing", response_model=MayaBriefing)
 def maya_briefing(request: MayaBriefingRequest) -> MayaBriefing:
-    return build_maya_briefing(request, RobotMemory(memory))
+    return build_maya_briefing(request, RobotMemory(memory), ContextStore(memory))
 
 
 @app.post("/voice/conversation", response_model=VoiceConversationResponse)

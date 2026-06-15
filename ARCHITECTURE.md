@@ -5,6 +5,8 @@ GrimBot Butler OS is organized as a modular robotics platform. The current relea
 ## Modules
 
 - `brain/` contains the runnable FastAPI brain server and CLI demo.
+- `brain/grimbot_brain/console/` contains the dependency-free local Maya operator console.
+- `brain/grimbot_brain/identity/` contains structured Chief of Staff identity and business context.
 - `memory/` stores SQLite robot memory and local runtime databases.
 - `perception/` is reserved for camera, sensor, and multimodal perception adapters.
 - `planner/` is reserved for higher-level task and behavior planning.
@@ -243,3 +245,39 @@ Matching is deterministic:
 4. structured no-match output below the requested confidence threshold
 
 v0.9 exposes no execution endpoint. Procedural memory cannot invoke skills, mutate adaptive state, modify safety rules, control motors, or create external tool calls.
+
+## Current Maya Console Flow
+
+v0.10 adds a local operator interface served by the existing FastAPI process at `GET /console`.
+
+1. FastAPI serves static HTML, CSS, and JavaScript from the packaged console directory.
+2. Initial page load uses GET requests only for health, state, skills, dream facts, promotions, procedures, pending proposals, rooms, hazards, and mess zones.
+3. Chat uses the existing push-to-talk conversation endpoint with an explicit typed transcript.
+4. Briefings, skill runs, dream cycles, reviews, matching, and relevant-memory queries require an explicit button or form submission.
+5. Machine output remains collapsed and separate from Maya's user-facing response.
+6. Empty API results and structured errors render without breaking the rest of the console.
+
+The console adds no new mutation APIs. It cannot execute procedures, auto-run dreams, auto-approve proposals, bypass skill permissions, modify safety rules, control hardware, or call external tools.
+
+## Current Chief of Staff Context Flow
+
+v0.10.1 adds a structured context domain so Maya can reason from Julian's life and business priorities before considering room upkeep.
+
+SQLite stores:
+
+- typed identity context for profile, mission, ventures, priorities, relationships, decisions, constraints, protocols, beliefs, bottlenecks, and next actions
+- active project records with status, priority, bottleneck, next action, related entities, source, verification state, and update timestamps
+
+Default context is seeded idempotently during database initialization from Julian's portfolio and the approved v0.10.1 project list. Seeded records remain source-labeled. Operator updates use the `julian_prime` source and preserve explicit verification state.
+
+Briefing order:
+
+1. current business and life priorities
+2. active projects
+3. current bottlenecks
+4. next actions
+5. room, hazard, and cleanup context when physically relevant
+
+Conversation routing is deterministic. Day and priority questions produce a Chief of Staff briefing. Named-project questions search structured context. Explicit room, cleaning, vision, hazard, sensor, and movement questions retain robot-memory behavior. Unknown requests produce one clarifying question instead of defaulting to a room scan.
+
+Context is advisory. It cannot override `safety.py`, execute skills or procedures, control motors, approve proposals, or call external tools.
