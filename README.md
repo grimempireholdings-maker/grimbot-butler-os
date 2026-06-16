@@ -19,6 +19,7 @@ Create a safe, affordable personal robotic assistant capable of perception, memo
 - [x] Procedural Memory Foundation
 - [x] Maya Console
 - [x] Chief of Staff Context
+- [x] Conversational Maya Agent
 - [ ] External Tool Use
 - [ ] Rover Platform
 - [ ] Object Manipulation
@@ -48,6 +49,8 @@ Phase 8 adds GrimBot Procedural Memory v0.9: strict procedure schemas, immutable
 Phase 9 adds Maya Console v0.10: a local operator interface for conversation, briefings, adaptive state, skills, dreaming review, procedural memory review, and robot memory inspection.
 
 Phase 10 adds Maya Chief of Staff Context v0.10.1: structured personal and business context for Julian, his ventures, active projects, priorities, relationships, bottlenecks, protocols, and next actions.
+
+Phase 10.2 adds Conversational Maya Agent v0.10.2: deterministic intent routing, natural Maya responses, provider hooks, and console chat integration without defaulting to room scans.
 
 LLM output is never connected directly to motors. Every movement command must pass through `brain/grimbot_brain/safety.py`.
 
@@ -108,6 +111,8 @@ http://127.0.0.1:8000/console
 The console loads state, skills, dream facts, procedure records, and robot memory through read-only requests. Chat, briefings, skill runs, dream cycles, review decisions, procedure matching, and memory recall occur only after an explicit operator action.
 
 The console does not add autonomous execution, procedure execution, motors, hardware control, external tools, or automatic approval. Skill permissions and all existing safety boundaries remain authoritative.
+
+Console chat uses the v0.10.2 conversational Maya agent. Casual chat stays conversational, day/planning questions route to Chief of Staff briefing, named-project questions use context recall, and room scanning appears only for explicit physical, cleaning, vision, hazard, sensor, or robot requests.
 
 ## Run CLI Demo
 
@@ -257,14 +262,54 @@ Voice conversation responses keep command and memory JSON separate from speech o
 ```json
 {
   "transcript": "what should I clean first?",
+  "agent_response": {
+    "intent": "room_or_physical_request",
+    "user_response": "For the physical side, I would start with: clear hazard: loose cord on floor. Safety stays in front; this is guidance only, not movement.",
+    "verified": false
+  },
   "machine_output": {"next_best_action": "clear hazard: loose cord on floor"},
   "speech_output": {
-    "text": "Not verified yet. Here is the signal: Next best action is clear hazard: loose cord on floor",
+    "text": "For the physical side, I would start with: clear hazard: loose cord on floor. Safety stays in front; this is guidance only, not movement.",
     "mode": "mock",
     "audio_path": null
   }
 }
 ```
+
+## Conversational Maya
+
+`POST /voice/conversation` now returns an `agent_response` object with intent, natural `user_response`, retrieved context, skill/procedure suggestions, machine output, and verification state.
+
+Supported intents:
+
+- `casual_chat`
+- `chief_of_staff_briefing`
+- `project_recall`
+- `memory_search`
+- `skill_request`
+- `procedure_request`
+- `dream_review`
+- `room_or_physical_request`
+- `unclear`
+
+The default conversation provider is mock/deterministic. Optional provider selection uses `GRIMBOT_CONVERSATION_PROVIDER`, separate from vision and dreaming providers. v0.10.2 does not require Gemini, OpenAI, Claude, or any paid API for conversation tests.
+
+Real conversation providers are conversation-only and never receive tool access. Set one provider explicitly:
+
+```powershell
+$env:GRIMBOT_CONVERSATION_PROVIDER="claude"  # requires ANTHROPIC_API_KEY
+$env:GRIMBOT_CONVERSATION_PROVIDER="openai"  # requires OPENAI_API_KEY
+$env:GRIMBOT_CONVERSATION_PROVIDER="openrouter"  # requires OPENROUTER_API_KEY
+$env:GRIMBOT_CONVERSATION_PROVIDER="gemini"  # requires GEMINI_API_KEY
+```
+
+OpenRouter uses `OPENROUTER_MODEL`, defaulting to `openrouter/auto`, and may include `OPENROUTER_SITE_URL` as the optional HTTP referer.
+
+Or use `GRIMBOT_CONVERSATION_PROVIDER=auto` to prefer Claude, then OpenAI, then OpenRouter, then Gemini when keys exist. The default remains `mock`, even if API keys are present.
+
+LLM conversation output must validate as the existing `agent_response` JSON schema. If validation fails, Maya falls back to the deterministic mock response. Even valid provider output can only replace `user_response`; intent, machine output, verification state, skill/procedure suggestions, and safety metadata remain controlled by GrimBot.
+
+Maya may suggest skills, procedures, searches, reviews, and next actions. She may not execute procedures, call external tools, control hardware, approve changes, or override `safety.py`.
 
 ## Skills Registry
 

@@ -1,7 +1,7 @@
 [project]
 name = "grimbot-brain"
-version = "0.10.1"
-description = "GrimBot Butler OS: Maya Chief of Staff context with a local operator console."
+version = "0.10.2"
+description = "GrimBot Butler OS: conversational Maya agent with Chief of Staff context and local console."
 readme = "README.md"
 requires-python = ">=3.10"
 dependencies = [

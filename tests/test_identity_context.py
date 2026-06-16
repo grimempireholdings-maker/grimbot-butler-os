@@ -238,7 +238,8 @@ def test_unverified_project_context_cannot_be_presented_as_verified(tmp_path, mo
 
     assert result.machine_output["projects"][0]["verified"] is False
     assert result.maya_response.verified is False
-    assert result.speech_output.text.startswith("Not verified yet.")
+    assert not result.speech_output.text.startswith("Verified.")
+    assert "unverified" in result.speech_output.text.lower()
 
 
 def test_unverified_priority_makes_briefing_unverified(tmp_path) -> None:

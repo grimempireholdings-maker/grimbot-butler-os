@@ -4,6 +4,8 @@ from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
+from .conversation_schemas import ConversationalAgentResponse
+
 
 RobotAction = Literal["stop", "move_forward", "turn_left", "turn_right", "reverse", "idle"]
 VisionMode = Literal["mock", "gemini"]
@@ -272,6 +274,7 @@ class VoiceConversationResponse(BaseModel):
 
     transcript: str = Field(min_length=1, max_length=1000)
     memory_context: RelevantMemoryResult
+    agent_response: ConversationalAgentResponse | None = None
     maya_response: MayaComposedResponse
     speech_output: TextToSpeechResult
     machine_output: dict

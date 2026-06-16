@@ -61,6 +61,8 @@
 - [x] Chief of Staff Identity Context
 - [x] Project-Aware Briefings
 - [x] Context Search and Recall
+- [x] Conversational Maya Agent
+- [x] Natural Intent Routing
 
 ## Phase 11
 

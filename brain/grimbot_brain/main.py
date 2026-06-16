@@ -75,14 +75,18 @@ load_dotenv()
 
 CONSOLE_DIR = Path(__file__).resolve().parent / "console"
 
-app = FastAPI(title="GrimBot Butler OS Brain", version="0.10.1")
+app = FastAPI(title="GrimBot Butler OS Brain", version="0.10.2")
 app.mount("/console/assets", StaticFiles(directory=CONSOLE_DIR), name="console-assets")
 memory = BrainMemory()
 
 
 @app.get("/console", response_class=FileResponse, include_in_schema=False)
 def console_page() -> FileResponse:
-    return FileResponse(CONSOLE_DIR / "index.html", media_type="text/html")
+    return FileResponse(
+        CONSOLE_DIR / "index.html",
+        media_type="text/html",
+        headers={"Cache-Control": "no-store"},
+    )
 
 
 @app.get("/health")

@@ -89,6 +89,10 @@ function addChatMessage(kind, text, machineOutput = null) {
   log.scrollTop = log.scrollHeight;
 }
 
+function submitButtonFor(event) {
+  return event.submitter || byId("chat-form").querySelector('button[type="submit"]');
+}
+
 async function sendChat(event) {
   event.preventDefault();
   const input = byId("chat-input");
@@ -97,7 +101,7 @@ async function sendChat(event) {
   addChatMessage("user", text);
   input.value = "";
   try {
-    await withButton(event.submitter, async () => {
+    await withButton(submitButtonFor(event), async () => {
       const result = await api("/voice/conversation", {
         method: "POST",
         body: {
@@ -107,10 +111,14 @@ async function sendChat(event) {
           verified: false,
         },
       });
-      const responseText = result.speech_output?.text
+      const responseText = result.agent_response?.user_response
+        || result.speech_output?.text
         || result.maya_response?.user_response
         || "No response text returned.";
-      addChatMessage("maya", responseText, result.machine_output || result.maya_response?.machine_output);
+      const machineOutput = result.agent_response?.machine_output
+        || result.machine_output
+        || result.maya_response?.machine_output;
+      addChatMessage("maya", responseText, machineOutput);
     });
   } catch (error) {
     addChatMessage("maya", `Request failed: ${error.message}`);
