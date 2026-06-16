@@ -281,3 +281,18 @@ Briefing order:
 Conversation routing is deterministic. Day and priority questions produce a Chief of Staff briefing. Named-project questions search structured context. Explicit room, cleaning, vision, hazard, sensor, and movement questions retain robot-memory behavior. Unknown requests produce one clarifying question instead of defaulting to a room scan.
 
 Context is advisory. It cannot override `safety.py`, execute skills or procedures, control motors, approve proposals, or call external tools.
+
+## Current Conversational Maya Flow
+
+v0.10.2 adds a conversational agent above the push-to-talk chat path. The agent keeps Maya natural while preserving structured outputs and safety boundaries.
+
+1. `/voice/conversation` receives an explicit transcript or safe mock STT result.
+2. The agent classifies intent as casual chat, briefing, project recall, memory search, skill request, procedure request, dream review, room/physical request, or unclear.
+3. Chief of Staff and project-context requests route before physical room logic.
+4. Room scans and robot memory are used only for explicit physical, cleaning, vision, hazard, sensor, battery, movement, or robot requests.
+5. Unclear requests return one clarifying question.
+6. The response includes `agent_response`, legacy `maya_response`, `speech_output`, and separate `machine_output`.
+
+Conversation providers are isolated from vision and dreaming providers. The default provider is deterministic mock mode. Optional Gemini, OpenAI, and Claude hooks are configuration placeholders and do not create hard paid-API dependencies.
+
+The conversational layer can suggest skills, procedure matches, reviews, searches, and next actions. It cannot execute procedures, invoke skills from procedures, call external tools, control motors or hardware, approve pending items, mutate safety rules, or bypass `safety.py`.
