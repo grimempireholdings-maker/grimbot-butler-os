@@ -24,7 +24,17 @@ Briefing and named-project recall are checked before physical routing. Physical 
 
 ## Provider Boundary
 
-The default provider is `mock`, which is deterministic and requires no API key. `GRIMBOT_CONVERSATION_PROVIDER` may be set to `gemini`, `openai`, or `claude`; those hooks are intentionally inert unless future provider clients are added. Conversation providers are separate from vision and dreaming providers.
+The default provider is `mock`, which is deterministic and requires no API key. `GRIMBOT_CONVERSATION_PROVIDER` may be set to `claude`, `openai`, `openrouter`, `gemini`, or `auto`. Conversation providers are separate from vision and dreaming providers.
+
+Provider environment:
+
+- `claude` requires `ANTHROPIC_API_KEY`
+- `openai` requires `OPENAI_API_KEY`
+- `openrouter` requires `OPENROUTER_API_KEY` and uses `OPENROUTER_MODEL`, defaulting to `openrouter/auto`
+- `gemini` requires `GEMINI_API_KEY`
+- `auto` prefers Claude, then OpenAI, then OpenRouter, then Gemini when keys exist
+
+The default remains `mock`, even if API keys are present. Missing keys, HTTP errors, invalid JSON, or schema validation failures fall back to the deterministic response.
 
 ## Response Contract
 
@@ -49,6 +59,8 @@ The voice endpoint keeps legacy fields too:
 - `maya_response.user_response` mirrors the conversational text for older clients.
 - `speech_output.text` uses the conversational text.
 - `machine_output` remains separate and collapsed in the console.
+
+For real providers, the model is asked to return the same structured JSON shape. The response is validated with the existing Pydantic schema. After validation, only `user_response` is accepted from the provider; intent, confidence, retrieved context, suggestions, machine output, and verification state remain controlled by GrimBot.
 
 ## Safety Boundaries
 

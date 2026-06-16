@@ -101,6 +101,26 @@ def test_console_static_assets_load() -> None:
     assert b"loadAllReadOnlyPanels" in js_body
 
 
+def test_console_chat_uses_voice_conversation_agent_response() -> None:
+    script = (main_module.CONSOLE_DIR / "console.js").read_text(encoding="utf-8")
+    html = (main_module.CONSOLE_DIR / "index.html").read_text(encoding="utf-8")
+    paths = {route.path for route in main_module.app.routes}
+
+    assert "/console/chat" not in paths
+    assert 'api("/voice/conversation"' in script
+    assert "result.agent_response?.user_response" in script
+    assert script.index("result.agent_response?.user_response") < script.index("result.maya_response?.user_response")
+    assert "/console/assets/console.js?v=0.10.2" in html
+    assert "/console/assets/console.css?v=0.10.2" in html
+
+
+def test_console_route_disables_html_cache() -> None:
+    status, headers, _ = _get("/console")
+
+    assert status == 200
+    assert headers["cache-control"] == "no-store"
+
+
 def test_console_page_load_does_not_mutate_database(tmp_path, monkeypatch) -> None:
     memory = BrainMemory(tmp_path / "console.sqlite3")
     monkeypatch.setattr(main_module, "memory", memory)

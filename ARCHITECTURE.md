@@ -293,6 +293,8 @@ v0.10.2 adds a conversational agent above the push-to-talk chat path. The agent 
 5. Unclear requests return one clarifying question.
 6. The response includes `agent_response`, legacy `maya_response`, `speech_output`, and separate `machine_output`.
 
-Conversation providers are isolated from vision and dreaming providers. The default provider is deterministic mock mode. Optional Gemini, OpenAI, and Claude hooks are configuration placeholders and do not create hard paid-API dependencies.
+Conversation providers are isolated from vision and dreaming providers. The default provider is deterministic mock mode. Optional Claude, OpenAI, OpenRouter, and Gemini providers can be enabled with `GRIMBOT_CONVERSATION_PROVIDER` and their provider API keys. `auto` mode prefers Claude, then OpenAI, then OpenRouter, then Gemini when keys exist.
+
+Provider output must validate as `agent_response` JSON. After validation, GrimBot accepts only provider wording for `user_response`; deterministic routing keeps intent, machine output, verification state, suggestions, and safety metadata authoritative. Invalid provider output falls back to mock response text.
 
 The conversational layer can suggest skills, procedure matches, reviews, searches, and next actions. It cannot execute procedures, invoke skills from procedures, call external tools, control motors or hardware, approve pending items, mutate safety rules, or bypass `safety.py`.

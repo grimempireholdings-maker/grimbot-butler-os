@@ -82,7 +82,11 @@ memory = BrainMemory()
 
 @app.get("/console", response_class=FileResponse, include_in_schema=False)
 def console_page() -> FileResponse:
-    return FileResponse(CONSOLE_DIR / "index.html", media_type="text/html")
+    return FileResponse(
+        CONSOLE_DIR / "index.html",
+        media_type="text/html",
+        headers={"Cache-Control": "no-store"},
+    )
 
 
 @app.get("/health")

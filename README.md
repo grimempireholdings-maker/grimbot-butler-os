@@ -294,6 +294,21 @@ Supported intents:
 
 The default conversation provider is mock/deterministic. Optional provider selection uses `GRIMBOT_CONVERSATION_PROVIDER`, separate from vision and dreaming providers. v0.10.2 does not require Gemini, OpenAI, Claude, or any paid API for conversation tests.
 
+Real conversation providers are conversation-only and never receive tool access. Set one provider explicitly:
+
+```powershell
+$env:GRIMBOT_CONVERSATION_PROVIDER="claude"  # requires ANTHROPIC_API_KEY
+$env:GRIMBOT_CONVERSATION_PROVIDER="openai"  # requires OPENAI_API_KEY
+$env:GRIMBOT_CONVERSATION_PROVIDER="openrouter"  # requires OPENROUTER_API_KEY
+$env:GRIMBOT_CONVERSATION_PROVIDER="gemini"  # requires GEMINI_API_KEY
+```
+
+OpenRouter uses `OPENROUTER_MODEL`, defaulting to `openrouter/auto`, and may include `OPENROUTER_SITE_URL` as the optional HTTP referer.
+
+Or use `GRIMBOT_CONVERSATION_PROVIDER=auto` to prefer Claude, then OpenAI, then OpenRouter, then Gemini when keys exist. The default remains `mock`, even if API keys are present.
+
+LLM conversation output must validate as the existing `agent_response` JSON schema. If validation fails, Maya falls back to the deterministic mock response. Even valid provider output can only replace `user_response`; intent, machine output, verification state, skill/procedure suggestions, and safety metadata remain controlled by GrimBot.
+
 Maya may suggest skills, procedures, searches, reviews, and next actions. She may not execute procedures, call external tools, control hardware, approve changes, or override `safety.py`.
 
 ## Skills Registry

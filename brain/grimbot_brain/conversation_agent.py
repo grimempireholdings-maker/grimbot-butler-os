@@ -1,9 +1,14 @@
 from __future__ import annotations
 
+import json
 import os
 import re
+import urllib.error
+import urllib.request
 from dataclasses import dataclass
 from typing import Protocol
+
+from pydantic import ValidationError
 
 from .conversation_schemas import (
     ConversationIntent,
@@ -30,7 +35,7 @@ from .schemas import (
 class ConversationProvider(Protocol):
     name: str
 
-    def generate(self, prompt: str, fallback_response: str) -> str:
+    def generate(self, prompt: str, fallback_response: ConversationalAgentResponse) -> ConversationalAgentResponse:
         ...
 
 
@@ -38,30 +43,242 @@ class ConversationProvider(Protocol):
 class MockConversationProvider:
     name: str = "mock"
 
-    def generate(self, prompt: str, fallback_response: str) -> str:
+    def generate(self, prompt: str, fallback_response: ConversationalAgentResponse) -> ConversationalAgentResponse:
         return fallback_response
 
 
 @dataclass(frozen=True)
-class OptionalApiConversationProvider:
+class ApiConversationProvider:
     name: str
     env_key: str
+    model_env_key: str
+    default_model: str
 
-    def generate(self, prompt: str, fallback_response: str) -> str:
-        # Hook for future provider clients. No network call or paid SDK is required for v0.10.2.
-        if not os.getenv(self.env_key):
-            return fallback_response
-        return fallback_response
+    def generate(
+        self,
+        prompt: str,
+        fallback_response: ConversationalAgentResponse,
+    ) -> ConversationalAgentResponse:
+        api_key = os.getenv(self.env_key, "").strip()
+        if not api_key:
+            return _fallback_with_reason(
+                fallback_response,
+                f"missing {self.env_key}",
+                attempted_provider=self.name,
+            )
+        try:
+            raw_text = self._call(prompt, fallback_response, api_key)
+            parsed = _validated_llm_response(raw_text)
+        except Exception as exc:
+            return _fallback_with_reason(
+                fallback_response,
+                f"{self.name} provider fallback: {exc}",
+                attempted_provider=self.name,
+            )
+        return _safe_provider_response(fallback_response, parsed, self.name)
+
+    def _call(
+        self,
+        prompt: str,
+        fallback_response: ConversationalAgentResponse,
+        api_key: str,
+    ) -> str:
+        raise NotImplementedError
+
+    def _model(self) -> str:
+        return os.getenv(self.model_env_key, self.default_model).strip() or self.default_model
+
+
+class ClaudeConversationProvider(ApiConversationProvider):
+    def _call(
+        self,
+        prompt: str,
+        fallback_response: ConversationalAgentResponse,
+        api_key: str,
+    ) -> str:
+        payload = {
+            "model": self._model(),
+            "max_tokens": _provider_max_tokens(),
+            "temperature": 0.4,
+            "system": _provider_system_prompt(),
+            "messages": [{"role": "user", "content": _provider_user_prompt(prompt, fallback_response)}],
+        }
+        response = _post_json(
+            "https://api.anthropic.com/v1/messages",
+            payload,
+            {
+                "x-api-key": api_key,
+                "anthropic-version": "2023-06-01",
+            },
+        )
+        content = response.get("content", [])
+        if not content or not isinstance(content, list):
+            raise ValueError("Claude response missing content")
+        text = "".join(
+            item.get("text", "")
+            for item in content
+            if isinstance(item, dict) and item.get("type") == "text"
+        ).strip()
+        if not text:
+            raise ValueError("Claude response missing text")
+        return text
+
+
+class OpenAIConversationProvider(ApiConversationProvider):
+    def _call(
+        self,
+        prompt: str,
+        fallback_response: ConversationalAgentResponse,
+        api_key: str,
+    ) -> str:
+        payload = {
+            "model": self._model(),
+            "input": [
+                {"role": "system", "content": _provider_system_prompt()},
+                {"role": "user", "content": _provider_user_prompt(prompt, fallback_response)},
+            ],
+            "text": {
+                "format": {
+                    "type": "json_schema",
+                    "name": "conversational_agent_response",
+                    "schema": _conversation_response_schema(),
+                    "strict": True,
+                }
+            },
+            "max_output_tokens": _provider_max_tokens(),
+            "temperature": 0.4,
+        }
+        response = _post_json(
+            "https://api.openai.com/v1/responses",
+            payload,
+            {"Authorization": f"Bearer {api_key}"},
+        )
+        output_text = response.get("output_text")
+        if isinstance(output_text, str) and output_text.strip():
+            return output_text
+        for item in response.get("output", []):
+            if not isinstance(item, dict):
+                continue
+            for content in item.get("content", []):
+                if isinstance(content, dict) and content.get("text"):
+                    return str(content["text"])
+        raise ValueError("OpenAI response missing text")
+
+
+class OpenRouterConversationProvider(ApiConversationProvider):
+    def _call(
+        self,
+        prompt: str,
+        fallback_response: ConversationalAgentResponse,
+        api_key: str,
+    ) -> str:
+        payload = {
+            "model": self._model(),
+            "messages": [
+                {"role": "system", "content": _provider_system_prompt()},
+                {"role": "user", "content": _provider_user_prompt(prompt, fallback_response)},
+            ],
+            "response_format": {"type": "json_object"},
+            "max_tokens": _provider_max_tokens(),
+            "temperature": 0.4,
+        }
+        headers = {"Authorization": f"Bearer {api_key}"}
+        site_url = os.getenv("OPENROUTER_SITE_URL", "").strip()
+        if site_url:
+            headers["HTTP-Referer"] = site_url
+        headers["X-OpenRouter-Title"] = "GrimBot Butler OS"
+        response = _post_json(
+            "https://openrouter.ai/api/v1/chat/completions",
+            payload,
+            headers,
+        )
+        choices = response.get("choices", [])
+        if not choices or not isinstance(choices, list):
+            raise ValueError("OpenRouter response missing choices")
+        message = choices[0].get("message", {})
+        content = message.get("content")
+        if not isinstance(content, str) or not content.strip():
+            raise ValueError("OpenRouter response missing content")
+        return content
+
+
+class GeminiConversationProvider(ApiConversationProvider):
+    def _call(
+        self,
+        prompt: str,
+        fallback_response: ConversationalAgentResponse,
+        api_key: str,
+    ) -> str:
+        model = self._model()
+        payload = {
+            "contents": [
+                {
+                    "role": "user",
+                    "parts": [{"text": f"{_provider_system_prompt()}\n\n{_provider_user_prompt(prompt, fallback_response)}"}],
+                }
+            ],
+            "generationConfig": {
+                "temperature": 0.4,
+                "maxOutputTokens": _provider_max_tokens(),
+                "responseMimeType": "application/json",
+                "responseSchema": _conversation_response_schema(),
+            },
+        }
+        response = _post_json(
+            f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent?key={api_key}",
+            payload,
+            {},
+        )
+        candidates = response.get("candidates", [])
+        if not candidates:
+            raise ValueError("Gemini response missing candidates")
+        parts = candidates[0].get("content", {}).get("parts", [])
+        text = "".join(part.get("text", "") for part in parts if isinstance(part, dict)).strip()
+        if not text:
+            raise ValueError("Gemini response missing text")
+        return text
 
 
 def provider_from_env() -> ConversationProvider:
     provider = os.getenv("GRIMBOT_CONVERSATION_PROVIDER", "mock").strip().lower()
+    if provider == "auto":
+        if os.getenv("ANTHROPIC_API_KEY", "").strip():
+            return ClaudeConversationProvider(
+                "claude",
+                "ANTHROPIC_API_KEY",
+                "GRIMBOT_CONVERSATION_CLAUDE_MODEL",
+                "claude-3-5-sonnet-latest",
+            )
+        if os.getenv("OPENAI_API_KEY", "").strip():
+            return OpenAIConversationProvider(
+                "openai",
+                "OPENAI_API_KEY",
+                "GRIMBOT_CONVERSATION_OPENAI_MODEL",
+                "gpt-4.1-mini",
+            )
+        if os.getenv("OPENROUTER_API_KEY", "").strip():
+            return OpenRouterConversationProvider(
+                "openrouter",
+                "OPENROUTER_API_KEY",
+                "OPENROUTER_MODEL",
+                "openrouter/auto",
+            )
+        if os.getenv("GEMINI_API_KEY", "").strip():
+            return GeminiConversationProvider(
+                "gemini",
+                "GEMINI_API_KEY",
+                "GRIMBOT_CONVERSATION_GEMINI_MODEL",
+                "gemini-1.5-flash",
+            )
+        return MockConversationProvider()
     if provider == "gemini":
-        return OptionalApiConversationProvider("gemini", "GEMINI_API_KEY")
+        return GeminiConversationProvider("gemini", "GEMINI_API_KEY", "GRIMBOT_CONVERSATION_GEMINI_MODEL", "gemini-1.5-flash")
     if provider == "openai":
-        return OptionalApiConversationProvider("openai", "OPENAI_API_KEY")
-    if provider == "claude":
-        return OptionalApiConversationProvider("claude", "ANTHROPIC_API_KEY")
+        return OpenAIConversationProvider("openai", "OPENAI_API_KEY", "GRIMBOT_CONVERSATION_OPENAI_MODEL", "gpt-4.1-mini")
+    if provider == "openrouter":
+        return OpenRouterConversationProvider("openrouter", "OPENROUTER_API_KEY", "OPENROUTER_MODEL", "openrouter/auto")
+    if provider in {"claude", "anthropic"}:
+        return ClaudeConversationProvider("claude", "ANTHROPIC_API_KEY", "GRIMBOT_CONVERSATION_CLAUDE_MODEL", "claude-3-5-sonnet-latest")
     return MockConversationProvider()
 
 
@@ -459,9 +676,9 @@ def _response(
         "hardware_control": "not_used",
     }
     prompt = build_conversation_prompt(transcript, intent, retrieved_context, machine_output)
-    return ConversationalAgentResponse(
+    fallback = ConversationalAgentResponse(
         intent=intent,
-        user_response=provider.generate(prompt, text),
+        user_response=text,
         confidence=confidence,
         retrieved_context=retrieved_context,
         suggested_skill=suggested_skill,
@@ -469,6 +686,7 @@ def _response(
         machine_output=machine_output,
         verified=verified,
     )
+    return provider.generate(prompt, fallback)
 
 
 def _briefing_text(briefing: MayaBriefing) -> str:
@@ -648,3 +866,212 @@ def _is_casual_chat(normalized: str) -> bool:
 
 def _normalize(value: str) -> str:
     return re.sub(r"[^a-z0-9]+", " ", value.lower()).strip()
+
+
+def _provider_system_prompt() -> str:
+    return (
+        "You are Maya's conversation wording layer for GrimBot Butler OS. "
+        "Return only valid JSON matching the provided schema. "
+        "Do not call tools, execute procedures, control hardware, approve changes, "
+        "or change machine_output. Improve only the natural user_response while "
+        "preserving safety, intent, verification, and permission boundaries."
+    )
+
+
+def _provider_user_prompt(prompt: str, fallback_response: ConversationalAgentResponse) -> str:
+    return "\n\n".join(
+        [
+            prompt,
+            "Return JSON matching this exact existing response shape.",
+            json.dumps(fallback_response.model_dump(), ensure_ascii=True, sort_keys=True),
+            "Keep intent, confidence, retrieved_context, suggestions, machine_output, and verified unchanged.",
+            "Only user_response may be made more natural. Do not start casual replies with a disclaimer.",
+        ]
+    )
+
+
+def _conversation_response_schema() -> dict:
+    suggestion_schema = {
+        "type": "object",
+        "additionalProperties": False,
+        "properties": {
+            "name": {"type": "string"},
+            "confidence": {"type": "number", "minimum": 0, "maximum": 1},
+            "required_permission": {"type": "string"},
+            "reason": {"type": "string"},
+        },
+        "required": ["name", "confidence", "required_permission", "reason"],
+    }
+    return {
+        "type": "object",
+        "additionalProperties": False,
+        "properties": {
+            "intent": {
+                "type": "string",
+                "enum": [
+                    "casual_chat",
+                    "chief_of_staff_briefing",
+                    "project_recall",
+                    "memory_search",
+                    "skill_request",
+                    "procedure_request",
+                    "dream_review",
+                    "room_or_physical_request",
+                    "unclear",
+                ],
+            },
+            "user_response": {"type": "string"},
+            "confidence": {"type": "number", "minimum": 0, "maximum": 1},
+            "retrieved_context": {
+                "type": "array",
+                "items": {"type": "object", "additionalProperties": True},
+            },
+            "suggested_skill": {"anyOf": [suggestion_schema, {"type": "null"}]},
+            "suggested_procedure": {"anyOf": [suggestion_schema, {"type": "null"}]},
+            "machine_output": {"type": "object", "additionalProperties": True},
+            "verified": {"type": "boolean"},
+        },
+        "required": [
+            "intent",
+            "user_response",
+            "confidence",
+            "retrieved_context",
+            "suggested_skill",
+            "suggested_procedure",
+            "machine_output",
+            "verified",
+        ],
+    }
+
+
+def _provider_max_tokens() -> int:
+    raw_value = os.getenv("GRIMBOT_CONVERSATION_MAX_TOKENS", "900")
+    try:
+        return max(128, min(4000, int(raw_value)))
+    except ValueError:
+        return 900
+
+
+def _provider_timeout() -> float:
+    raw_value = os.getenv("GRIMBOT_CONVERSATION_TIMEOUT_SECONDS", "20")
+    try:
+        return max(1.0, min(60.0, float(raw_value)))
+    except ValueError:
+        return 20.0
+
+
+def _post_json(url: str, payload: dict, headers: dict[str, str]) -> dict:
+    request = urllib.request.Request(
+        url,
+        data=json.dumps(payload).encode("utf-8"),
+        headers={
+            "Content-Type": "application/json",
+            **headers,
+        },
+        method="POST",
+    )
+    try:
+        with urllib.request.urlopen(request, timeout=_provider_timeout()) as response:
+            return json.loads(response.read().decode("utf-8"))
+    except urllib.error.HTTPError as exc:
+        detail = exc.read().decode("utf-8", errors="replace")[:500]
+        raise ValueError(f"provider HTTP {exc.code}: {detail}") from exc
+    except json.JSONDecodeError as exc:
+        raise ValueError("provider returned non-JSON response") from exc
+
+
+def _validated_llm_response(raw_text: str) -> ConversationalAgentResponse:
+    try:
+        payload = json.loads(_extract_json_object(raw_text))
+    except json.JSONDecodeError as exc:
+        raise ValueError("provider returned invalid JSON") from exc
+    return ConversationalAgentResponse.model_validate(payload)
+
+
+def _extract_json_object(raw_text: str) -> str:
+    cleaned = raw_text.strip()
+    if cleaned.startswith("```"):
+        cleaned = re.sub(r"^```(?:json)?\s*", "", cleaned)
+        cleaned = re.sub(r"\s*```$", "", cleaned).strip()
+    start = cleaned.find("{")
+    end = cleaned.rfind("}")
+    if start == -1 or end == -1 or end < start:
+        raise ValueError("provider response did not contain a JSON object")
+    return cleaned[start : end + 1]
+
+
+def _safe_provider_response(
+    fallback_response: ConversationalAgentResponse,
+    parsed_response: ConversationalAgentResponse,
+    provider_name: str,
+) -> ConversationalAgentResponse:
+    user_response = parsed_response.user_response.strip()
+    if not user_response:
+        return _fallback_with_reason(
+            fallback_response,
+            "provider response was blank",
+            attempted_provider=provider_name,
+        )
+    unsafe_reason = _unsafe_provider_text_reason(user_response)
+    if unsafe_reason:
+        return _fallback_with_reason(
+            fallback_response,
+            unsafe_reason,
+            attempted_provider=provider_name,
+        )
+    machine_output = {
+        **fallback_response.machine_output,
+        "conversation_provider": provider_name,
+        "provider_response": "validated",
+    }
+    return fallback_response.model_copy(
+        update={
+            "user_response": user_response,
+            "machine_output": machine_output,
+        }
+    )
+
+
+def _fallback_with_reason(
+    fallback_response: ConversationalAgentResponse,
+    reason: str,
+    attempted_provider: str | None = None,
+) -> ConversationalAgentResponse:
+    machine_output = {
+        **fallback_response.machine_output,
+        "conversation_provider": "mock",
+        "provider_response": "fallback_to_mock",
+        "provider_fallback_reason": reason[:500],
+    }
+    if attempted_provider:
+        machine_output["provider_attempted"] = attempted_provider
+    return fallback_response.model_copy(
+        update={
+            "machine_output": machine_output
+        }
+    )
+
+
+def _unsafe_provider_text_reason(user_response: str) -> str | None:
+    normalized = _normalize(user_response)
+    unsafe_phrases = (
+        "i executed",
+        "i ran the procedure",
+        "i ran this procedure",
+        "i ran the skill",
+        "i approved",
+        "i rejected",
+        "i sent the email",
+        "i emailed",
+        "i opened github",
+        "i created a pull request",
+        "i moved the robot",
+        "motors engaged",
+        "hardware activated",
+        "auto approved",
+        "procedure executed",
+        "tool executed",
+    )
+    if any(phrase in normalized for phrase in unsafe_phrases):
+        return "provider text implied execution or external action"
+    return None
