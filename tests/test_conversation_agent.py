@@ -11,6 +11,7 @@ from grimbot_brain.conversation_agent import (
     provider_from_env,
     run_conversation_agent,
 )
+from grimbot_brain.conversation_retrieval import MAX_RETRIEVAL_QUERY_LENGTH, build_retrieval_query
 from grimbot_brain.conversation_schemas import ConversationalAgentResponse
 from grimbot_brain.memory import BrainMemory
 from grimbot_brain.schemas import VoiceConversationRequest
@@ -64,6 +65,155 @@ def test_work_today_question_routes_to_briefing_not_room_scan(tmp_path) -> None:
     assert "clean" not in result.speech_output.text.lower()
 
 
+def test_long_casual_message_does_not_crash_or_start_room_scan(tmp_path) -> None:
+    long_message = (
+        ("haha idk " * 45)
+        + "Maya this is mostly me rambling through a casual check-in before we pick a lane. "
+        + ("etc whatever " * 30)
+    )
+
+    result = _chat(tmp_path, long_message)
+
+    assert result.agent_response is not None
+    assert result.speech_output.text
+    assert "String should have at most" not in result.speech_output.text
+    assert "ValidationError" not in result.speech_output.text
+    assert "traceback" not in result.speech_output.text.lower()
+    assert result.agent_response.intent != "room_or_physical_request"
+    assert result.machine_output.get("room_scan_requested") is not True
+    assert len(result.machine_output["retrieval"]["query"]) <= MAX_RETRIEVAL_QUERY_LENGTH
+
+
+def test_long_project_message_builds_short_project_context_query() -> None:
+    long_message = (
+        ("haha idk " * 35)
+        + "I want Maya thinking clearly about GrimBot architecture, real estate, land flipping, "
+        + "and Maya Console without clogging retrieval with the whole ramble. "
+        + ("etc basically whatever " * 22)
+    )
+
+    retrieval_query = build_retrieval_query(long_message)
+
+    assert len(retrieval_query.query) <= MAX_RETRIEVAL_QUERY_LENGTH
+    assert "grimbot" in retrieval_query.query
+    assert "real estate" in retrieval_query.query
+    assert "maya" in retrieval_query.query
+    assert "architecture" in retrieval_query.query
+    assert "haha" not in retrieval_query.query
+    assert "idk" not in retrieval_query.query
+    assert "etc" not in retrieval_query.query
+
+
+def test_core_semantic_anchors_survive_filler_stripping() -> None:
+    anchors = [
+        "GrimBot",
+        "Maya",
+        "real estate",
+        "JARVIS",
+        "Optimus",
+        "architecture",
+        "OpenClaw",
+        "Codex",
+        "procedure",
+        "memory",
+        "dreaming",
+        "body",
+        "robot",
+    ]
+    long_message = (
+        ("haha idk etc whatever " * 25)
+        + " ".join(anchors)
+        + (" basically literally just stuff " * 25)
+    )
+
+    retrieval_query = build_retrieval_query(long_message)
+    query = retrieval_query.query
+
+    assert len(query) <= MAX_RETRIEVAL_QUERY_LENGTH
+    for anchor in anchors:
+        assert anchor.lower() in query
+    assert "haha" not in query
+    assert "idk" not in query
+    assert "etc" not in query
+
+
+def test_memory_retrieval_failure_degrades_without_leaking_validation_error(tmp_path, monkeypatch) -> None:
+    def fail_relevant(*args, **kwargs):
+        raise ValueError("RelevantMemoryRequest query String should have at most 500 characters")
+
+    monkeypatch.setattr("grimbot_brain.robot_memory.RobotMemory.relevant", fail_relevant)
+
+    result = _chat(
+        tmp_path,
+        ("haha " * 80) + "Maya, give me the useful signal on GrimBot and real estate priorities.",
+    )
+
+    assert result.agent_response is not None
+    assert result.speech_output.text
+    assert "String should have at most" not in result.speech_output.text
+    assert "RelevantMemoryRequest" not in result.speech_output.text
+    assert "ValidationError" not in result.speech_output.text
+    assert result.machine_output["retrieval_status"] == "fallback"
+    assert result.machine_output["retrieval_errors"]["memory"]["status"] == "fallback"
+    assert len(result.machine_output["retrieval"]["query"]) <= MAX_RETRIEVAL_QUERY_LENGTH
+
+
+def test_context_retrieval_failure_degrades_without_leaking_traceback(tmp_path, monkeypatch) -> None:
+    def fail_search(*args, **kwargs):
+        raise RuntimeError("Traceback: ContextSearchRequest query String should have at most 500 characters")
+
+    monkeypatch.setattr("grimbot_brain.identity.context_store.ContextStore.search", fail_search)
+
+    result = _chat(
+        tmp_path,
+        ("haha idk " * 50) + "Maya, what do you remember about GrimBot architecture and Codex?",
+    )
+
+    assert result.agent_response is not None
+    assert result.speech_output.text
+    assert "Traceback" not in result.speech_output.text
+    assert "ContextSearchRequest" not in result.speech_output.text
+    assert "String should have at most" not in result.speech_output.text
+    assert result.machine_output["retrieval_status"] == "fallback"
+    assert result.machine_output["retrieval_errors"]["context"]["status"] == "fallback"
+    assert len(result.machine_output["retrieval"]["query"]) <= MAX_RETRIEVAL_QUERY_LENGTH
+
+
+class CapturingProvider:
+    name = "mock"
+
+    def __init__(self) -> None:
+        self.prompt = ""
+
+    def generate(self, prompt: str, fallback_response: ConversationalAgentResponse) -> ConversationalAgentResponse:
+        self.prompt = prompt
+        return fallback_response
+
+
+def test_full_transcript_reaches_provider_while_retrieval_uses_short_query(tmp_path) -> None:
+    transcript = (
+        ("haha idk " * 40)
+        + "Maya, keep the full messy human context about GrimBot, OpenClaw, Codex, "
+        + "Optimus, JARVIS, real estate, architecture, body, robot, memory, dreaming, "
+        + "and procedure work available to the conversation provider."
+        + (" etc whatever " * 18)
+    )
+    provider = CapturingProvider()
+
+    result = run_conversation_agent(
+        request=VoiceConversationRequest(push_to_talk=True, mock_transcript=transcript),
+        transcript=transcript,
+        memory=BrainMemory(tmp_path / "memory.sqlite3"),
+        provider=provider,
+    )
+
+    assert transcript in provider.prompt
+    assert len(result.machine_output["retrieval"]["query"]) <= MAX_RETRIEVAL_QUERY_LENGTH
+    assert len(result.machine_output["retrieval"]["query"]) < len(transcript)
+    assert "OpenClaw" in provider.prompt
+    assert "openclaw" in result.machine_output["retrieval"]["query"]
+
+
 def test_grimbot_question_routes_to_project_recall(tmp_path) -> None:
     result = _chat(tmp_path, "What do you remember about GrimBot?")
 
@@ -71,6 +221,9 @@ def test_grimbot_question_routes_to_project_recall(tmp_path) -> None:
     assert result.agent_response.intent == "project_recall"
     assert result.machine_output["projects"][0]["name"] == "GrimBot Butler OS"
     assert "GrimBot Butler OS" in result.speech_output.text
+    assert "bottleneck" in result.speech_output.text.lower()
+    assert "next" in result.speech_output.text.lower()
+    assert "which project" not in result.speech_output.text.lower()
 
 
 def test_casual_detector_does_not_match_hi_inside_other_words(tmp_path) -> None:
@@ -348,7 +501,8 @@ def test_openrouter_call_uses_required_endpoint_headers_and_model(monkeypatch) -
     assert captured["headers"]["HTTP-Referer"] == "https://example.test"
     assert captured["headers"]["X-OpenRouter-Title"] == "GrimBot Butler OS"
     assert captured["payload"]["model"] == "openrouter/auto"
-    assert captured["payload"]["response_format"] == {"type": "json_object"}
+    assert captured["payload"]["response_format"]["type"] == "json_schema"
+    assert captured["payload"]["response_format"]["json_schema"]["strict"] is True
     assert json.loads(raw_text)["user_response"] == "Provider text."
 
 
@@ -429,6 +583,34 @@ def test_provider_text_implying_execution_falls_back_to_mock(tmp_path, monkeypat
     assert result.machine_output["provider_response"] == "fallback_to_mock"
     assert "I ran the procedure" not in result.user_response
     assert result.machine_output["procedure_execution"] == "not_available"
+
+
+def test_provider_text_implying_hardware_activation_falls_back_to_mock(tmp_path, monkeypatch) -> None:
+    monkeypatch.setenv("OPENAI_API_KEY", "test-key")
+    raw = {
+        "intent": "casual_chat",
+        "user_response": "Motor engaged. I activated the hardware.",
+        "confidence": 1,
+        "retrieved_context": [],
+        "suggested_skill": None,
+        "suggested_procedure": None,
+        "machine_output": {},
+        "verified": False,
+    }
+
+    result = run_conversation_agent(
+        request=VoiceConversationRequest(push_to_talk=True, mock_transcript="Hey Maya"),
+        transcript="Hey Maya",
+        memory=BrainMemory(tmp_path / "memory.sqlite3"),
+        provider=FakeApiProvider(json.dumps(raw)),
+    )
+
+    assert result.intent == "casual_chat"
+    assert result.machine_output["conversation_provider"] == "mock"
+    assert result.machine_output["provider_attempted"] == "openai"
+    assert result.machine_output["provider_response"] == "fallback_to_mock"
+    assert "Motor engaged" not in result.user_response
+    assert result.machine_output["hardware_control"] == "not_used"
 
 
 def test_invalid_provider_json_falls_back_safely(tmp_path, monkeypatch) -> None:

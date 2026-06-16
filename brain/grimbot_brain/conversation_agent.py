@@ -15,6 +15,7 @@ from .conversation_schemas import (
     ConversationSuggestion,
     ConversationalAgentResponse,
 )
+from .conversation_retrieval import RetrievalQuery, build_retrieval_query
 from .identity.context_schemas import ContextSearchRequest, ContextSearchResult, ProjectContext
 from .identity.context_store import ContextStore
 from .maya_core import build_maya_briefing
@@ -178,7 +179,14 @@ class OpenRouterConversationProvider(ApiConversationProvider):
                 {"role": "system", "content": _provider_system_prompt()},
                 {"role": "user", "content": _provider_user_prompt(prompt, fallback_response)},
             ],
-            "response_format": {"type": "json_object"},
+            "response_format": {
+                "type": "json_schema",
+                "json_schema": {
+                    "name": "conversational_agent_response",
+                    "strict": True,
+                    "schema": _conversation_response_schema(),
+                },
+            },
             "max_tokens": _provider_max_tokens(),
             "temperature": 0.4,
         }
@@ -288,19 +296,41 @@ def run_conversation_agent(
     memory: BrainMemory,
     memory_context: RelevantMemoryResult | None = None,
     provider: ConversationProvider | None = None,
+    retrieval_query: RetrievalQuery | None = None,
+    memory_retrieval_error: str | None = None,
 ) -> ConversationalAgentResponse:
     robot_memory = RobotMemory(memory)
     context = ContextStore(memory)
-    memory_context = memory_context or robot_memory.relevant(
-        RelevantMemoryRequest(
-            query=transcript,
-            room_name=request.room_name,
-            zone_name=request.zone_name,
-            limit=10,
-        )
-    )
-    context_result = context.search(ContextSearchRequest(query=transcript, limit=10))
-    intent = classify_intent(transcript, request, context_result, context.projects())
+    retrieval_query = retrieval_query or build_retrieval_query(transcript)
+    context_retrieval_error = None
+    if memory_context is None:
+        try:
+            memory_context = robot_memory.relevant(
+                RelevantMemoryRequest(
+                    query=retrieval_query.query,
+                    room_name=request.room_name,
+                    zone_name=request.zone_name,
+                    limit=10,
+                )
+            )
+        except Exception:
+            memory_retrieval_error = "memory_retrieval_failed"
+            memory_context = RelevantMemoryResult(
+                query=retrieval_query.query,
+                room_name=request.room_name,
+                hazards=[],
+                mess_zones=[],
+                cleanup_tasks=[],
+                semantic_facts=[],
+                next_best_action="Use Chief of Staff context before choosing a physical action.",
+            )
+    try:
+        context_result = context.search(ContextSearchRequest(query=retrieval_query.query, limit=10))
+    except Exception:
+        context_retrieval_error = "context_retrieval_failed"
+        context_result = _fallback_context_result(context, retrieval_query)
+    projects = context_result.projects or _safe_projects(context)
+    intent = classify_intent(transcript, request, context_result, projects)
     provider = provider or provider_from_env()
 
     if intent == "chief_of_staff_briefing":
@@ -322,7 +352,80 @@ def run_conversation_agent(
     else:
         agent_response = _unclear_response(transcript, context_result, provider)
 
-    return agent_response
+    return _attach_retrieval_metadata(
+        agent_response,
+        retrieval_query,
+        memory_retrieval_error=memory_retrieval_error,
+        context_retrieval_error=context_retrieval_error,
+    )
+
+
+def _fallback_context_result(context: ContextStore, retrieval_query: RetrievalQuery) -> ContextSearchResult:
+    try:
+        summary = context.summary()
+    except Exception:
+        return ContextSearchResult(
+            query=retrieval_query.query,
+            entries=[],
+            projects=[],
+            next_best_action="Ask one clarifying question before recommending action.",
+            needs_clarification=True,
+            clarification_question="Which project, priority, person, or decision should I focus on?",
+        )
+    entries = [*summary.priorities[:3], *summary.bottlenecks[:2], *summary.next_actions[:2]]
+    projects = summary.projects[:3]
+    if projects:
+        next_action = projects[0].next_action
+    elif entries:
+        next_action = entries[0].content
+    else:
+        next_action = "Ask one clarifying question before recommending action."
+    return ContextSearchResult(
+        query=retrieval_query.query,
+        entries=entries,
+        projects=projects,
+        next_best_action=next_action,
+        needs_clarification=not entries and not projects,
+        clarification_question=(
+            "Which project, priority, person, or decision should I focus on?"
+            if not entries and not projects
+            else None
+        ),
+    )
+
+
+def _safe_projects(context: ContextStore) -> list[ProjectContext]:
+    try:
+        return context.projects()
+    except Exception:
+        return []
+
+
+def _attach_retrieval_metadata(
+    response: ConversationalAgentResponse,
+    retrieval_query: RetrievalQuery,
+    memory_retrieval_error: str | None,
+    context_retrieval_error: str | None,
+) -> ConversationalAgentResponse:
+    errors = {}
+    if memory_retrieval_error:
+        errors["memory"] = {
+            "status": "fallback",
+            "reason": "Memory retrieval failed; fallback context was used.",
+        }
+    if context_retrieval_error:
+        errors["context"] = {
+            "status": "fallback",
+            "reason": "Context retrieval failed; top projects and priorities were used.",
+        }
+    machine_output = {
+        **response.machine_output,
+        "retrieval": retrieval_query.machine_output(),
+        "retrieval_status": "fallback" if errors else "ok",
+    }
+    if errors:
+        machine_output["retrieval_errors"] = errors
+    return response.model_copy(update={"machine_output": machine_output})
 
 
 def classify_intent(
@@ -1066,6 +1169,7 @@ def _unsafe_provider_text_reason(user_response: str) -> str | None:
         "i opened github",
         "i created a pull request",
         "i moved the robot",
+        "motor engaged",
         "motors engaged",
         "hardware activated",
         "auto approved",
