@@ -133,12 +133,16 @@ class ApiConversationProvider:
     def _model(self) -> str:
         return os.getenv(self.model_env_key, self.default_model).strip() or self.default_model
 
+    def _classifier_model(self) -> str:
+        override = os.getenv("GRIMBOT_CONVERSATION_CLASSIFIER_MODEL", "").strip()
+        return override if override else self._model()
+
 
 class ClaudeConversationProvider(ApiConversationProvider):
     def _call_classification(self, prompt: str, api_key: str, timeout: float) -> str:
         payload = {
-            "model": self._model(),
-            "max_tokens": 15,
+            "model": self._classifier_model(),
+            "max_tokens": 64,
             "temperature": 0,
             "messages": [{"role": "user", "content": prompt}],
         }
@@ -193,9 +197,9 @@ class ClaudeConversationProvider(ApiConversationProvider):
 class OpenAIConversationProvider(ApiConversationProvider):
     def _call_classification(self, prompt: str, api_key: str, timeout: float) -> str:
         payload = {
-            "model": self._model(),
+            "model": self._classifier_model(),
             "messages": [{"role": "user", "content": prompt}],
-            "max_tokens": 15,
+            "max_tokens": 64,
             "temperature": 0,
         }
         response = _post_json(
@@ -207,7 +211,7 @@ class OpenAIConversationProvider(ApiConversationProvider):
         choices = response.get("choices", [])
         if not choices:
             raise ValueError("OpenAI classification response missing choices")
-        return choices[0].get("message", {}).get("content", "").strip()
+        return (choices[0].get("message", {}).get("content") or "").strip()
 
     def _call(
         self,
@@ -252,9 +256,9 @@ class OpenAIConversationProvider(ApiConversationProvider):
 class OpenRouterConversationProvider(ApiConversationProvider):
     def _call_classification(self, prompt: str, api_key: str, timeout: float) -> str:
         payload = {
-            "model": self._model(),
+            "model": self._classifier_model(),
             "messages": [{"role": "user", "content": prompt}],
-            "max_tokens": 15,
+            "max_tokens": 64,
             "temperature": 0,
         }
         headers: dict[str, str] = {"Authorization": f"Bearer {api_key}"}
@@ -271,7 +275,13 @@ class OpenRouterConversationProvider(ApiConversationProvider):
         choices = response.get("choices", [])
         if not choices:
             raise ValueError("OpenRouter classification response missing choices")
-        return choices[0].get("message", {}).get("content", "").strip()
+        message = choices[0].get("message", {})
+        # Reasoning models (e.g. DeepSeek-R1 via openrouter/free) return content: null
+        # and put the actual response in reasoning_content. Accept either.
+        raw = (message.get("content") or message.get("reasoning_content") or "").strip()
+        if not raw:
+            raise ValueError("OpenRouter classification response was empty")
+        return raw
 
     def _call(
         self,
@@ -318,10 +328,10 @@ class OpenRouterConversationProvider(ApiConversationProvider):
 
 class GeminiConversationProvider(ApiConversationProvider):
     def _call_classification(self, prompt: str, api_key: str, timeout: float) -> str:
-        model = self._model()
+        model = self._classifier_model()
         payload = {
             "contents": [{"role": "user", "parts": [{"text": prompt}]}],
-            "generationConfig": {"temperature": 0, "maxOutputTokens": 15},
+            "generationConfig": {"temperature": 0, "maxOutputTokens": 64},
         }
         response = _post_json(
             f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent?key={api_key}",
@@ -428,7 +438,8 @@ def _build_classification_prompt(transcript: str, recent_turns: tuple[dict, ...]
         "capability_question, unclear"
     )
     lines = [
-        "Classify this user message into exactly one ConversationMode.",
+        "TASK: Output exactly one mode name from the list below. No explanation, no punctuation, no other text.",
+        "",
         f"Valid modes: {mode_list}",
         "",
         "Key rules:",
@@ -447,7 +458,7 @@ def _build_classification_prompt(transcript: str, recent_turns: tuple[dict, ...]
         lines.append("")
     lines.append(f'Current message from Julian: "{transcript}"')
     lines.append("")
-    lines.append("Reply with ONLY the mode string, nothing else.")
+    lines.append("Mode:")
     return "\n".join(lines)
 
 
@@ -455,6 +466,11 @@ def _parse_mode(raw: str) -> ConversationMode:
     mode = raw.strip().lower().replace("-", "_").replace(" ", "_")
     if mode in _VALID_MODES:
         return mode  # type: ignore[return-value]
+    # Secondary scan: find any valid mode token embedded in verbose output
+    normalized = raw.lower().replace("-", "_")
+    for candidate in sorted(_VALID_MODES, key=len, reverse=True):
+        if re.search(r"\b" + re.escape(candidate) + r"\b", normalized):
+            return candidate  # type: ignore[return-value]
     raise ValueError(f"LLM returned unrecognized mode: {raw!r}")
 
 
@@ -912,13 +928,19 @@ def build_conversation_prompt(
             "Be useful without hijacking the conversation.",
             *mode_constraints,
             (
-                "NON-NEGOTIABLE CAPABILITY RULE: You may ONLY claim awareness or capability that appears as true "
-                "in the CAPABILITIES manifest below. If asked about something not available there (camera, "
-                "microphone, device layout, screen contents, browser tabs, physical room, or hardware), say plainly "
-                "that you do not have that capability yet. Do not describe what you would do if you did."
+                "NON-NEGOTIABLE CAPABILITY RULE: Do not claim capabilities you do not have. "
+                "You have read-only local workspace access only. No camera, microphone, internet, screen, "
+                "browser tabs, device layout, physical room, or external tools. "
+                "If Julian asks about those, say plainly you do not have that yet — do not describe what you would do if you did."
             ),
-            "CAPABILITIES manifest (verbatim):",
-            capabilities_prompt_block(),
+            *(
+                [
+                    "CAPABILITIES manifest (inject only for capability_question mode):",
+                    capabilities_prompt_block(),
+                ]
+                if conversation_mode == "capability_question"
+                else []
+            ),
             f"Conversation mode: {conversation_mode}",
             f"Intent: {intent}",
             f"User message: {transcript}",
