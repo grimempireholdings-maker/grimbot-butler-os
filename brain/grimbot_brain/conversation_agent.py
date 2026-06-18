@@ -681,6 +681,15 @@ def build_conversation_prompt(
     conversation_mode: ConversationMode = "unclear",
     recent_messages: tuple[str, ...] = (),
 ) -> str:
+    mode_constraints: list[str] = []
+    if conversation_mode in _HUMAN_MOMENT_MODES:
+        mode_constraints = [
+            f"MODE CONSTRAINT ({conversation_mode}): This is a human moment, not a task assignment.",
+            "Do NOT name, recommend, or focus on any specific project in user_response.",
+            "Do NOT surface priority_items, active_projects, or open_loops in user_response.",
+            "Ask what Julian wants to focus on; do not choose for him.",
+        ]
+
     return "\n".join(
         [
             "Maya is Julian's operator and Chief of Staff layer; she behaves like one without saying the title.",
@@ -696,6 +705,7 @@ def build_conversation_prompt(
             "If Julian sounds tired, groggy, joking, or conversational, respond human-first.",
             "Ask what he wants to focus on instead of assigning a focus every time.",
             "Be useful without hijacking the conversation.",
+            *mode_constraints,
             (
                 "NON-NEGOTIABLE CAPABILITY RULE: You may ONLY claim awareness or capability that appears as true "
                 "in the CAPABILITIES manifest below. If asked about something not available there (camera, "
@@ -915,8 +925,8 @@ def _morning_response(
     open_loops = [project.current_bottleneck for project in summary.projects[:3]]
     lanes = _human_list(project_names) or "no active lanes recorded"
     text = (
-        f"Morning. I am here. Light signal: {lanes} are active lanes. "
-        "This is orientation, not an assignment. What do you want to focus on?"
+        f"Morning. I am here. Active lanes: {lanes}. "
+        "This is orientation. What do you want to focus on?"
     )
     machine_output = {
         "priority_items": priorities,
@@ -1210,6 +1220,22 @@ def _unclear_response(
     )
 
 
+_HUMAN_MOMENT_MODES = frozenset({"casual", "morning_orientation", "feedback_about_maya"})
+_STRIP_FROM_PROMPT = frozenset({"priority_items", "active_projects", "open_loops", "recommended_focus"})
+
+
+def _prompt_safe_machine_output(machine_output: dict, mode: str) -> dict:
+    """Return a copy of machine_output with project/priority data removed for human-moment modes.
+
+    The LLM uses whatever keys it sees to infer what to write. Leaving active_projects or
+    priority_items in the prompt for casual/morning/feedback modes causes it to write
+    project-directive responses even when the fallback text says otherwise.
+    """
+    if mode not in _HUMAN_MOMENT_MODES:
+        return machine_output
+    return {k: v for k, v in machine_output.items() if k not in _STRIP_FROM_PROMPT}
+
+
 def _response(
     intent: ConversationIntent,
     transcript: str,
@@ -1236,7 +1262,7 @@ def _response(
         transcript,
         intent,
         retrieved_context,
-        machine_output,
+        _prompt_safe_machine_output(machine_output, runtime.mode),
         conversation_mode=runtime.mode,
         recent_messages=runtime.recent_messages,
     )
