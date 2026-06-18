@@ -62,6 +62,10 @@ _CONVERSATION_RUNTIME: ContextVar[ConversationRuntime] = ContextVar(
     "conversation_runtime",
     default=ConversationRuntime(),
 )
+_CLASSIFICATION_SOURCE: ContextVar[str] = ContextVar(
+    "classification_source",
+    default="unknown",
+)
 
 
 class ConversationProvider(Protocol):
@@ -472,11 +476,15 @@ def classify_conversation_mode_with_fallback(
     recent_turns: tuple[dict, ...],
     provider: ConversationProvider,
     timeout: float = 3.0,
-) -> ConversationMode:
+) -> tuple[ConversationMode, str]:
+    """Return (mode, source) where source is 'llm' or 'rule_based:<reason>'."""
     try:
-        return _classify_via_llm(transcript, recent_turns, provider, timeout=timeout)
-    except Exception:
-        return classify_conversation_mode(transcript)
+        mode = _classify_via_llm(transcript, recent_turns, provider, timeout=timeout)
+        return mode, "llm"
+    except NotImplementedError as exc:
+        return classify_conversation_mode(transcript), f"rule_based:not_implemented:{exc}"
+    except Exception as exc:
+        return classify_conversation_mode(transcript), f"rule_based:fallback:{type(exc).__name__}:{str(exc)[:120]}"
 
 
 def run_conversation_agent(
@@ -494,7 +502,7 @@ def run_conversation_agent(
     effective_provider = provider or provider_from_env()
     with _SESSION_LOCK:
         _recent_turns = tuple(_SESSION_STATES.get(memory, ConversationSessionState()).recent_turns)
-    conversation_mode = classify_conversation_mode_with_fallback(
+    conversation_mode, _classification_source = classify_conversation_mode_with_fallback(
         transcript,
         recent_turns=_recent_turns,
         provider=effective_provider,
@@ -554,6 +562,7 @@ def run_conversation_agent(
     intent = classify_intent(transcript, request, context_result, projects)
     provider = effective_provider
     runtime_token = _CONVERSATION_RUNTIME.set(runtime)
+    source_token = _CLASSIFICATION_SOURCE.set(_classification_source)
     try:
         if conversation_mode == "capability_question":
             agent_response = _capability_response(transcript, intent, provider)
@@ -589,6 +598,7 @@ def run_conversation_agent(
             agent_response = _unclear_response(transcript, context_result, provider)
     finally:
         _CONVERSATION_RUNTIME.reset(runtime_token)
+        _CLASSIFICATION_SOURCE.reset(source_token)
 
     response = _attach_retrieval_metadata(
         agent_response,
@@ -1461,6 +1471,7 @@ def _response(
         "conversation_mode": runtime.mode,
         "conversation_intent": intent,
         "conversation_provider": provider.name,
+        "classification_source": _CLASSIFICATION_SOURCE.get(),
         "external_tools": "not_used",
         "procedure_execution": machine_output.get("procedure_execution", "not_used"),
         "hardware_control": "not_used",
