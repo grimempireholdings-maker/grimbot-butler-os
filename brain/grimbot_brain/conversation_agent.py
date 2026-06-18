@@ -45,6 +45,7 @@ class ConversationSessionState:
     recent_messages: deque[str] = field(default_factory=lambda: deque(maxlen=6))
     recent_modes: deque[ConversationMode] = field(default_factory=lambda: deque(maxlen=6))
     recent_recommendations: deque[str] = field(default_factory=lambda: deque(maxlen=3))
+    recent_turns: deque[dict] = field(default_factory=lambda: deque(maxlen=6))
 
 
 @dataclass(frozen=True)
@@ -52,6 +53,7 @@ class ConversationRuntime:
     mode: ConversationMode = "unclear"
     recent_messages: tuple[str, ...] = ()
     recent_recommendations: tuple[str, ...] = ()
+    recent_turns: tuple[dict, ...] = ()
 
 
 _SESSION_STATES: WeakKeyDictionary[BrainMemory, ConversationSessionState] = WeakKeyDictionary()
@@ -115,11 +117,41 @@ class ApiConversationProvider:
     ) -> str:
         raise NotImplementedError
 
+    def classify_mode(self, prompt: str, timeout: float = 3.0) -> str:
+        api_key = os.getenv(self.env_key, "").strip()
+        if not api_key:
+            raise ValueError(f"missing {self.env_key}")
+        return self._call_classification(prompt, api_key, timeout)
+
+    def _call_classification(self, prompt: str, api_key: str, timeout: float) -> str:
+        raise NotImplementedError
+
     def _model(self) -> str:
         return os.getenv(self.model_env_key, self.default_model).strip() or self.default_model
 
 
 class ClaudeConversationProvider(ApiConversationProvider):
+    def _call_classification(self, prompt: str, api_key: str, timeout: float) -> str:
+        payload = {
+            "model": self._model(),
+            "max_tokens": 15,
+            "temperature": 0,
+            "messages": [{"role": "user", "content": prompt}],
+        }
+        response = _post_json(
+            "https://api.anthropic.com/v1/messages",
+            payload,
+            {"x-api-key": api_key, "anthropic-version": "2023-06-01"},
+            timeout=timeout,
+        )
+        content = response.get("content", [])
+        if not content:
+            raise ValueError("Claude classification response missing content")
+        return "".join(
+            item.get("text", "") for item in content
+            if isinstance(item, dict) and item.get("type") == "text"
+        ).strip()
+
     def _call(
         self,
         prompt: str,
@@ -155,6 +187,24 @@ class ClaudeConversationProvider(ApiConversationProvider):
 
 
 class OpenAIConversationProvider(ApiConversationProvider):
+    def _call_classification(self, prompt: str, api_key: str, timeout: float) -> str:
+        payload = {
+            "model": self._model(),
+            "messages": [{"role": "user", "content": prompt}],
+            "max_tokens": 15,
+            "temperature": 0,
+        }
+        response = _post_json(
+            "https://api.openai.com/v1/chat/completions",
+            payload,
+            {"Authorization": f"Bearer {api_key}"},
+            timeout=timeout,
+        )
+        choices = response.get("choices", [])
+        if not choices:
+            raise ValueError("OpenAI classification response missing choices")
+        return choices[0].get("message", {}).get("content", "").strip()
+
     def _call(
         self,
         prompt: str,
@@ -196,6 +246,29 @@ class OpenAIConversationProvider(ApiConversationProvider):
 
 
 class OpenRouterConversationProvider(ApiConversationProvider):
+    def _call_classification(self, prompt: str, api_key: str, timeout: float) -> str:
+        payload = {
+            "model": self._model(),
+            "messages": [{"role": "user", "content": prompt}],
+            "max_tokens": 15,
+            "temperature": 0,
+        }
+        headers: dict[str, str] = {"Authorization": f"Bearer {api_key}"}
+        site_url = os.getenv("OPENROUTER_SITE_URL", "").strip()
+        if site_url:
+            headers["HTTP-Referer"] = site_url
+        headers["X-OpenRouter-Title"] = "GrimBot Butler OS"
+        response = _post_json(
+            "https://openrouter.ai/api/v1/chat/completions",
+            payload,
+            headers,
+            timeout=timeout,
+        )
+        choices = response.get("choices", [])
+        if not choices:
+            raise ValueError("OpenRouter classification response missing choices")
+        return choices[0].get("message", {}).get("content", "").strip()
+
     def _call(
         self,
         prompt: str,
@@ -240,6 +313,24 @@ class OpenRouterConversationProvider(ApiConversationProvider):
 
 
 class GeminiConversationProvider(ApiConversationProvider):
+    def _call_classification(self, prompt: str, api_key: str, timeout: float) -> str:
+        model = self._model()
+        payload = {
+            "contents": [{"role": "user", "parts": [{"text": prompt}]}],
+            "generationConfig": {"temperature": 0, "maxOutputTokens": 15},
+        }
+        response = _post_json(
+            f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent?key={api_key}",
+            payload,
+            {},
+            timeout=timeout,
+        )
+        candidates = response.get("candidates", [])
+        if not candidates:
+            raise ValueError("Gemini classification response missing candidates")
+        parts = candidates[0].get("content", {}).get("parts", [])
+        return "".join(part.get("text", "") for part in parts if isinstance(part, dict)).strip()
+
     def _call(
         self,
         prompt: str,
@@ -319,6 +410,75 @@ def provider_from_env() -> ConversationProvider:
     return MockConversationProvider()
 
 
+_VALID_MODES: frozenset = frozenset({
+    "casual", "morning_orientation", "work_focus", "personal_support",
+    "business_strategy", "project_context", "workspace_awareness",
+    "physical_environment", "feedback_about_maya", "capability_question", "unclear",
+})
+
+
+def _build_classification_prompt(transcript: str, recent_turns: tuple[dict, ...]) -> str:
+    mode_list = (
+        "casual, morning_orientation, work_focus, personal_support, business_strategy, "
+        "project_context, workspace_awareness, physical_environment, feedback_about_maya, "
+        "capability_question, unclear"
+    )
+    lines = [
+        "Classify this user message into exactly one ConversationMode.",
+        f"Valid modes: {mode_list}",
+        "",
+        "Key rules:",
+        "- feedback_about_maya: Julian is reacting to something Maya just said — correction, pushback, or meta-comment about her behavior. Requires conversation context to identify.",
+        "- morning_orientation: open-ended day-start check-in with no specific task request.",
+        "- capability_question: asking what Maya can/cannot access or do; also covers requests for external data (news, weather, internet) she does not have.",
+        "- casual: small talk not requesting work output.",
+        "- unclear: genuinely ambiguous after considering full context; prefer a specific mode if one fits.",
+        "",
+    ]
+    if recent_turns:
+        lines.append("Recent conversation (oldest to newest):")
+        for turn in recent_turns[-3:]:
+            lines.append(f'  Julian: "{turn["user"]}"')
+            lines.append(f'  Maya:   "{turn["maya"]}"')
+        lines.append("")
+    lines.append(f'Current message from Julian: "{transcript}"')
+    lines.append("")
+    lines.append("Reply with ONLY the mode string, nothing else.")
+    return "\n".join(lines)
+
+
+def _parse_mode(raw: str) -> ConversationMode:
+    mode = raw.strip().lower().replace("-", "_").replace(" ", "_")
+    if mode in _VALID_MODES:
+        return mode  # type: ignore[return-value]
+    raise ValueError(f"LLM returned unrecognized mode: {raw!r}")
+
+
+def _classify_via_llm(
+    transcript: str,
+    recent_turns: tuple[dict, ...],
+    provider: ConversationProvider,
+    timeout: float = 3.0,
+) -> ConversationMode:
+    if not isinstance(provider, ApiConversationProvider):
+        raise NotImplementedError("provider does not support LLM classification")
+    prompt = _build_classification_prompt(transcript, recent_turns)
+    raw = provider.classify_mode(prompt, timeout=timeout)
+    return _parse_mode(raw)
+
+
+def classify_conversation_mode_with_fallback(
+    transcript: str,
+    recent_turns: tuple[dict, ...],
+    provider: ConversationProvider,
+    timeout: float = 3.0,
+) -> ConversationMode:
+    try:
+        return _classify_via_llm(transcript, recent_turns, provider, timeout=timeout)
+    except Exception:
+        return classify_conversation_mode(transcript)
+
+
 def run_conversation_agent(
     request: VoiceConversationRequest,
     transcript: str,
@@ -331,7 +491,14 @@ def run_conversation_agent(
     robot_memory = RobotMemory(memory)
     context = ContextStore(memory)
     retrieval_query = retrieval_query or build_retrieval_query(transcript)
-    conversation_mode = classify_conversation_mode(transcript)
+    effective_provider = provider or provider_from_env()
+    with _SESSION_LOCK:
+        _recent_turns = tuple(_SESSION_STATES.get(memory, ConversationSessionState()).recent_turns)
+    conversation_mode = classify_conversation_mode_with_fallback(
+        transcript,
+        recent_turns=_recent_turns,
+        provider=effective_provider,
+    )
     runtime = _runtime_for(memory, conversation_mode)
     context_retrieval_error = None
     if memory_context is None:
@@ -385,7 +552,7 @@ def run_conversation_agent(
     }:
         projects = _safe_projects(context)
     intent = classify_intent(transcript, request, context_result, projects)
-    provider = provider or provider_from_env()
+    provider = effective_provider
     runtime_token = _CONVERSATION_RUNTIME.set(runtime)
     try:
         if conversation_mode == "capability_question":
@@ -465,6 +632,7 @@ def _runtime_for(memory: BrainMemory, mode: ConversationMode) -> ConversationRun
             mode=mode,
             recent_messages=tuple(state.recent_messages),
             recent_recommendations=tuple(state.recent_recommendations),
+            recent_turns=tuple(state.recent_turns),
         )
 
 
@@ -481,6 +649,10 @@ def _record_conversation(
         state.recent_modes.append(mode)
         if isinstance(recommendation, str) and recommendation.strip():
             state.recent_recommendations.append(recommendation.strip())
+        state.recent_turns.append({
+            "user": transcript.strip()[:500],
+            "maya": response.user_response.strip()[:500],
+        })
 
 
 def classify_conversation_mode(transcript: str) -> ConversationMode:
@@ -1635,7 +1807,7 @@ def _provider_timeout() -> float:
         return 20.0
 
 
-def _post_json(url: str, payload: dict, headers: dict[str, str]) -> dict:
+def _post_json(url: str, payload: dict, headers: dict[str, str], timeout: float | None = None) -> dict:
     request = urllib.request.Request(
         url,
         data=json.dumps(payload).encode("utf-8"),
@@ -1646,7 +1818,7 @@ def _post_json(url: str, payload: dict, headers: dict[str, str]) -> dict:
         method="POST",
     )
     try:
-        with urllib.request.urlopen(request, timeout=_provider_timeout()) as response:
+        with urllib.request.urlopen(request, timeout=timeout if timeout is not None else _provider_timeout()) as response:
             return json.loads(response.read().decode("utf-8"))
     except urllib.error.HTTPError as exc:
         detail = exc.read().decode("utf-8", errors="replace")[:500]
