@@ -683,12 +683,17 @@ def build_conversation_prompt(
 ) -> str:
     mode_constraints: list[str] = []
     if conversation_mode in _HUMAN_MOMENT_MODES:
+        _is_direct_question = "?" in transcript or any(
+            _normalize(transcript).startswith(w)
+            for w in ("what", "how", "any", "tell", "is", "can", "does", "do", "give", "catch", "fill")
+        )
         mode_constraints = [
             f"MODE CONSTRAINT ({conversation_mode}): This is a human moment, not a task assignment.",
             "Do NOT name, recommend, or focus on any specific project in user_response.",
             "Do NOT surface priority_items, active_projects, or open_loops in user_response.",
-            "Ask what Julian wants to focus on; do not choose for him.",
         ]
+        if conversation_mode == "morning_orientation" and not _is_direct_question:
+            mode_constraints.append("Julian has not asked a specific question — ask what he wants to focus on; do not choose for him.")
 
     return "\n".join(
         [
@@ -1377,6 +1382,18 @@ def _is_briefing_request(normalized: str) -> bool:
         "what should i work on today",
         "what are we working on today",
         "what should we work on today",
+        "what s happening",
+        "what is happening",
+        "what s going on",
+        "what is going on",
+        "any news",
+        "anything new",
+        "catch me up",
+        "fill me in",
+        "what did i miss",
+        "what have i missed",
+        "give me the rundown",
+        "give me a rundown",
     )
     return any(phrase in normalized for phrase in phrases)
 
