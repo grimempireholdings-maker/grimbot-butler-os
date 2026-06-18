@@ -541,6 +541,24 @@ def classify_conversation_mode(transcript: str) -> ConversationMode:
         return "capability_question"
     if "what are you capable of" in normalized:
         return "capability_question"
+    external_data_terms = {"news", "weather", "forecast", "temperature", "stock", "stocks", "market", "markets", "internet", "web", "google"}
+    external_data_phrases = (
+        "what s happening out there",
+        "what is happening out there",
+        "any news",
+        "anything new out there",
+        "what s the weather",
+        "what is the weather",
+        "check the weather",
+        "what s the latest",
+        "what is the latest",
+        "current events",
+        "search for",
+        "look that up",
+        "look it up",
+    )
+    if tokens & external_data_terms or any(phrase in normalized for phrase in external_data_phrases):
+        return "capability_question"
 
     morning_phrases = (
         "morning maya",
@@ -1055,6 +1073,8 @@ def _capability_response(
     provider: ConversationProvider,
 ) -> ConversationalAgentResponse:
     normalized = _normalize(transcript)
+    _external_data_terms = {"news", "weather", "forecast", "temperature", "stock", "stocks", "market", "markets", "internet", "web", "google"}
+    _tokens = set(normalized.split())
     if "camera" in normalized or "see" in normalized:
         text = (
             "No. I do not have camera access yet, and I cannot see the physical room. "
@@ -1070,11 +1090,21 @@ def _capability_response(
             "No. I cannot see screen contents, browser tabs, devices, or a device layout. "
             "My current digital awareness is limited to read-only inspection of the local repo/workspace."
         )
+    elif _tokens & _external_data_terms or any(
+        phrase in normalized
+        for phrase in ("happening out there", "any news", "what s the latest", "current events", "search for", "look that up", "look it up")
+    ):
+        text = (
+            "I do not have internet access, live news, weather, or real-time market data. "
+            "Everything I know comes from your stored context, local workspace, and memory — nothing from outside. "
+            "What I can offer: your current project status, open loops, priorities, or anything stored in memory."
+        )
     else:
         text = (
             "My current awareness is narrow: I can read the local repo/workspace, read-only, use the "
             "implemented memory tiers, and participate in manual human-reviewed dreaming. I cannot see, "
-            "hear, control hardware, execute procedures, modify files, or use external tools."
+            "hear, control hardware, execute procedures, modify files, or use external tools. "
+            "I have no internet access and no real-time data of any kind."
         )
     return _response(
         intent=intent,
@@ -1382,18 +1412,6 @@ def _is_briefing_request(normalized: str) -> bool:
         "what should i work on today",
         "what are we working on today",
         "what should we work on today",
-        "what s happening",
-        "what is happening",
-        "what s going on",
-        "what is going on",
-        "any news",
-        "anything new",
-        "catch me up",
-        "fill me in",
-        "what did i miss",
-        "what have i missed",
-        "give me the rundown",
-        "give me a rundown",
     )
     return any(phrase in normalized for phrase in phrases)
 
