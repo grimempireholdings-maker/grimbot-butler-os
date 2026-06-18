@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from .conversation_agent import run_conversation_agent
+from .conversation_agent import classify_conversation_mode, run_conversation_agent
 from .conversation_retrieval import RetrievalQuery, build_retrieval_query
 from .memory import BrainMemory
 from .persona import directives_for_mode, resolve_permission
@@ -22,18 +22,22 @@ def run_voice_conversation(request: VoiceConversationRequest, memory: BrainMemor
     stt = speech_to_text(mock_transcript=request.mock_transcript, audio_path=request.audio_path)
     robot_memory = RobotMemory(memory)
     retrieval_query = build_retrieval_query(stt.transcript)
+    conversation_mode = classify_conversation_mode(stt.transcript)
     memory_retrieval_error = None
-    try:
-        memory_context = robot_memory.relevant(
-            RelevantMemoryRequest(
-                query=retrieval_query.query,
-                room_name=request.room_name,
-                zone_name=request.zone_name,
-                limit=10,
+    if conversation_mode == "physical_environment":
+        try:
+            memory_context = robot_memory.relevant(
+                RelevantMemoryRequest(
+                    query=retrieval_query.query,
+                    room_name=request.room_name,
+                    zone_name=request.zone_name,
+                    limit=10,
+                )
             )
-        )
-    except Exception:
-        memory_retrieval_error = "memory_retrieval_failed"
+        except Exception:
+            memory_retrieval_error = "memory_retrieval_failed"
+            memory_context = _fallback_memory_context(retrieval_query, request)
+    else:
         memory_context = _fallback_memory_context(retrieval_query, request)
     agent_response = run_conversation_agent(
         request=request,
@@ -75,5 +79,5 @@ def _fallback_memory_context(
         mess_zones=[],
         cleanup_tasks=[],
         semantic_facts=[],
-        next_best_action="Use Chief of Staff context before choosing a physical action.",
+        next_best_action="No physical-memory lookup was needed for this conversation mode.",
     )

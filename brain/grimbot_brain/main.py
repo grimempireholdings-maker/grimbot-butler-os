@@ -44,6 +44,13 @@ from .robot_memory import RobotMemory
 from .room_scan import run_room_scan
 from .skills import create_default_registry
 from .response_composer import compose_maya_response
+from .workspace.workspace_inspector import WorkspaceInspector
+from .workspace.workspace_schemas import (
+    WorkspaceDocument,
+    WorkspaceOverview,
+    WorkspaceSearchRequest,
+    WorkspaceSearchResult,
+)
 from .schemas import (
     BrainCycleInput,
     MayaBriefing,
@@ -75,9 +82,10 @@ load_dotenv()
 
 CONSOLE_DIR = Path(__file__).resolve().parent / "console"
 
-app = FastAPI(title="GrimBot Butler OS Brain", version="0.10.2")
+app = FastAPI(title="GrimBot Butler OS Brain", version="0.10.5")
 app.mount("/console/assets", StaticFiles(directory=CONSOLE_DIR), name="console-assets")
 memory = BrainMemory()
+workspace = WorkspaceInspector()
 
 
 @app.get("/console", response_class=FileResponse, include_in_schema=False)
@@ -210,6 +218,21 @@ def voice_conversation(request: VoiceConversationRequest) -> VoiceConversationRe
         return run_voice_conversation(request, memory)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@app.get("/workspace", response_model=WorkspaceOverview)
+def workspace_get() -> WorkspaceOverview:
+    return workspace.overview()
+
+
+@app.get("/workspace/docs", response_model=list[WorkspaceDocument])
+def workspace_docs() -> list[WorkspaceDocument]:
+    return workspace.documents()
+
+
+@app.post("/workspace/search", response_model=WorkspaceSearchResult)
+def workspace_search(request: WorkspaceSearchRequest) -> WorkspaceSearchResult:
+    return workspace.search(request)
 
 
 @app.get("/skills", response_model=list[SkillInfo])

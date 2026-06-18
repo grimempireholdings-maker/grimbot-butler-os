@@ -1,5 +1,13 @@
 # Conversational Maya Agent Design
 
+## v0.10.5 Capability Manifest and Honesty Layer
+
+Maya's capabilities are an application-owned contract, never an LLM inference. `grimbot_brain.capabilities.CAPABILITIES` records which forms of awareness are active. The current release permits bounded, read-only local repository/workspace inspection and the implemented memory tiers. It explicitly denies camera, microphone, screen/tab, device-layout, robot-body, physical-room sensor, workspace-write, procedure-execution, and external-tool access.
+
+The manifest is serialized verbatim into every provider prompt with a non-negotiable instruction not to claim anything whose flag is false. Prompting is only the first boundary: provider wording passes through a post-generation honesty validator. Unsupported capability language triggers the deterministic safe response, preserving a plain denial instead of hypothetical feed-sharing or plausible-sounding fiction.
+
+Conversation mode is classified before retrieval. Capability questions use the manifest only; workspace awareness uses actual inspector output only; physical requests use robot memory; feedback uses Maya architecture context; mornings and work focus retrieve broad priorities; casual conversation stays context-light. This prevents unrelated project priorities from leaking into every conversation.
+
 v0.10.2 adds a deterministic conversational layer above Maya Console chat.
 
 ## Purpose

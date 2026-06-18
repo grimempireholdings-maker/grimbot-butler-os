@@ -1,5 +1,11 @@
 # Architecture
 
+## v0.10.5 Capability Honesty Boundary
+
+`capabilities.py` is the authoritative, hardcoded contract for Maya's runtime awareness. The manifest is copied verbatim into every conversational provider prompt. Mode classification occurs before retrieval, so capability questions receive only the manifest, workspace questions receive only bounded workspace-inspector data, and casual conversation does not inherit business or robot context.
+
+Provider output remains untrusted wording. After schema validation, the honesty gate rejects unsupported claims about cameras, microphones, screens, browser tabs, devices, layout, physical sight, sensors, or feed sharing and falls back to the deterministic response. This validation is independent of prompt compliance.
+
 GrimBot Butler OS is organized as a modular robotics platform. The current release focuses on Phase 0: a simulated robot brain that can run locally before any physical hardware is connected.
 
 ## Modules
@@ -7,6 +13,7 @@ GrimBot Butler OS is organized as a modular robotics platform. The current relea
 - `brain/` contains the runnable FastAPI brain server and CLI demo.
 - `brain/grimbot_brain/console/` contains the dependency-free local Maya operator console.
 - `brain/grimbot_brain/identity/` contains structured Chief of Staff identity and business context.
+- `brain/grimbot_brain/workspace/` contains bounded read-only repository inspection and safe text search.
 - `memory/` stores SQLite robot memory and local runtime databases.
 - `perception/` is reserved for camera, sensor, and multimodal perception adapters.
 - `planner/` is reserved for higher-level task and behavior planning.
@@ -251,11 +258,12 @@ v0.9 exposes no execution endpoint. Procedural memory cannot invoke skills, muta
 v0.10 adds a local operator interface served by the existing FastAPI process at `GET /console`.
 
 1. FastAPI serves static HTML, CSS, and JavaScript from the packaged console directory.
-2. Initial page load uses GET requests only for health, state, skills, dream facts, promotions, procedures, pending proposals, rooms, hazards, and mess zones.
+2. Initial page load uses GET requests only for health, Chief of Staff context, and workspace awareness.
 3. Chat uses the existing push-to-talk conversation endpoint with an explicit typed transcript.
 4. Briefings, skill runs, dream cycles, reviews, matching, and relevant-memory queries require an explicit button or form submission.
 5. Machine output remains collapsed and separate from Maya's user-facing response.
 6. Empty API results and structured errors render without breaking the rest of the console.
+7. Developer Mode reveals and loads adaptive state, skills, dreaming, procedural memory, and robot memory only after an explicit toggle.
 
 The console adds no new mutation APIs. It cannot execute procedures, auto-run dreams, auto-approve proposals, bypass skill permissions, modify safety rules, control hardware, or call external tools.
 
@@ -298,3 +306,24 @@ Conversation providers are isolated from vision and dreaming providers. The defa
 Provider output must validate as `agent_response` JSON. After validation, GrimBot accepts only provider wording for `user_response`; deterministic routing keeps intent, machine output, verification state, suggestions, and safety metadata authoritative. Invalid provider output falls back to mock response text.
 
 The conversational layer can suggest skills, procedure matches, reviews, searches, and next actions. It cannot execute procedures, invoke skills from procedures, call external tools, control motors or hardware, approve pending items, mutate safety rules, or bypass `safety.py`.
+
+## Current Workspace Awareness Flow
+
+v0.10.4 adds a read-only view of Maya's local digital workspace.
+
+1. `WorkspaceInspector` starts from the server working directory and discovers the nearest Git root with the fixed command `git rev-parse --show-toplevel`.
+2. Branch, short status, and the last five commits use three additional fixed Git argument tuples. Every subprocess call uses `shell=False`, captures output, and has a short timeout.
+3. Top-level entries and documentation are listed with bounded `pathlib` traversal. `.env`, secret-looking names, binary files, oversized files, caches, dependency directories, and databases are excluded.
+4. Workspace search performs literal case-insensitive matching in Python. It caps files scanned, file size, result count, and snippet length; it does not invoke shell search or evaluate regular expressions.
+5. Conversation routes repo, branch, architecture, workspace, recent-change, and digital-room questions to `workspace_awareness` before physical-room logic.
+6. Camera questions explicitly report that conversation has no live physical vision unless the separate room-scan flow is invoked.
+
+Endpoints:
+
+```text
+GET /workspace
+GET /workspace/docs
+POST /workspace/search
+```
+
+Workspace awareness cannot modify files, run arbitrary commands, execute procedures, invoke external tools, control hardware, or approve pending work.

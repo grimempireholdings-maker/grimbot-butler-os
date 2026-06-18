@@ -26,6 +26,10 @@ body {
   color: var(--text);
 }
 
+[hidden] {
+  display: none !important;
+}
+
 button,
 input,
 select,
@@ -102,6 +106,21 @@ h3 {
 .system-status {
   color: var(--muted);
   font-size: 0.85rem;
+}
+
+.developer-toggle {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  padding-right: 10px;
+  border-right: 1px solid var(--border);
+  color: var(--muted);
+  font-size: 0.78rem;
+}
+
+.developer-toggle input {
+  width: 16px;
+  min-height: 16px;
 }
 
 .status-dot {
@@ -421,6 +440,36 @@ pre {
   margin-top: 16px;
 }
 
+.workspace-summary {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.workspace-fact {
+  min-width: 0;
+  padding: 10px 12px;
+  border: 1px solid var(--border);
+  border-radius: 5px;
+  background: #141719;
+}
+
+.workspace-fact span,
+.workspace-fact strong {
+  display: block;
+  overflow-wrap: anywhere;
+}
+
+.workspace-fact span {
+  margin-bottom: 4px;
+  color: var(--muted);
+  font-size: 0.72rem;
+}
+
+.workspace-details {
+  margin-top: 16px;
+}
+
 .split-view {
   grid-template-columns: repeat(2, minmax(0, 1fr));
 }
@@ -534,6 +583,10 @@ pre {
   .context-controls {
     grid-template-columns: 1fr;
   }
+
+  .workspace-summary {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
 }
 
 @media (max-width: 620px) {
@@ -546,6 +599,12 @@ pre {
 
   .system-status {
     align-items: center;
+    flex-wrap: wrap;
+  }
+
+  .developer-toggle {
+    border-right: 0;
+    padding-right: 0;
   }
 
   .panel-heading .icon-button {
@@ -559,6 +618,10 @@ pre {
   }
 
   .signal-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .workspace-summary {
     grid-template-columns: 1fr;
   }
 

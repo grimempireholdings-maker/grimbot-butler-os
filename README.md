@@ -20,6 +20,7 @@ Create a safe, affordable personal robotic assistant capable of perception, memo
 - [x] Maya Console
 - [x] Chief of Staff Context
 - [x] Conversational Maya Agent
+- [x] Read-Only Workspace Awareness
 - [ ] External Tool Use
 - [ ] Rover Platform
 - [ ] Object Manipulation
@@ -51,6 +52,10 @@ Phase 9 adds Maya Console v0.10: a local operator interface for conversation, br
 Phase 10 adds Maya Chief of Staff Context v0.10.1: structured personal and business context for Julian, his ventures, active projects, priorities, relationships, bottlenecks, protocols, and next actions.
 
 Phase 10.2 adds Conversational Maya Agent v0.10.2: deterministic intent routing, natural Maya responses, provider hooks, and console chat integration without defaulting to room scans.
+
+Phase 10.4 adds Maya Workspace Awareness: bounded read-only inspection of the active repository, branch, status, recent commits, documentation, version, and safe project text search. Version `0.10.3` remains the existing OpenRouter provider release, so workspace awareness advances to `0.10.4` rather than reusing that tag.
+
+Phase 10.5 adds capability honesty and conversation modes. A hardcoded capability manifest is included in every provider prompt, unsupported awareness claims are rejected after generation, and casual, morning, feedback, work-focus, workspace, physical, and capability conversations retrieve only mode-appropriate context. Maya no longer treats Real Estate Acquisitions as the universal fallback.
 
 LLM output is never connected directly to motors. Every movement command must pass through `brain/grimbot_brain/safety.py`.
 
@@ -108,11 +113,34 @@ Open:
 http://127.0.0.1:8000/console
 ```
 
-The console loads state, skills, dream facts, procedure records, and robot memory through read-only requests. Chat, briefings, skill runs, dream cycles, review decisions, procedure matching, and memory recall occur only after an explicit operator action.
+The console initially loads daily-use Chief of Staff context and read-only workspace awareness. Adaptive state, skills, dreaming, procedural memory, and robot memory are hidden and unloaded until Developer Mode is enabled. Chat, briefings, skill runs, dream cycles, review decisions, procedure matching, workspace search, and memory recall occur only after an explicit operator action.
 
 The console does not add autonomous execution, procedure execution, motors, hardware control, external tools, or automatic approval. Skill permissions and all existing safety boundaries remain authoritative.
 
 Console chat uses the v0.10.2 conversational Maya agent. Casual chat stays conversational, day/planning questions route to Chief of Staff briefing, named-project questions use context recall, and room scanning appears only for explicit physical, cleaning, vision, hazard, sensor, or robot requests.
+
+## Workspace Awareness
+
+Maya can inspect the local project without modifying it:
+
+```text
+GET /workspace
+GET /workspace/docs
+POST /workspace/search
+```
+
+Workspace inspection reports the current repository root and name, branch, short status, last five commits, detected version, safe top-level items, documentation files, and warnings. Search is literal text matching across a bounded set of small text files. It skips `.git`, virtual environments, `node_modules`, caches, SQLite databases, `.env` files, binary files, large files, secret-looking filenames, and symlink escapes. Git inspection disables optional locks, and likely API-key patterns are redacted from returned text.
+
+Only these Git commands are available to workspace inspection, always with `shell=False` and a timeout:
+
+```text
+git rev-parse --show-toplevel
+git branch --show-current
+git status --short
+git log --oneline -5
+```
+
+Workspace awareness is digital and read-only. It is not physical camera vision, command execution, file editing, or an external-tool capability.
 
 ## Run CLI Demo
 

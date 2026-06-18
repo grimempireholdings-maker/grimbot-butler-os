@@ -257,6 +257,58 @@ async function rememberContext(event) {
   }
 }
 
+function workspaceFact(label, value) {
+  return `<div class="workspace-fact"><span>${escapeHtml(label)}</span><strong>${escapeHtml(value || "Unavailable")}</strong></div>`;
+}
+
+async function loadWorkspace() {
+  const summaryTarget = byId("workspace-summary");
+  const commitsTarget = byId("workspace-commits");
+  const warningsTarget = byId("workspace-warnings");
+  try {
+    const workspace = await api("/workspace");
+    summaryTarget.innerHTML = [
+      workspaceFact("Repository", workspace.repo_name),
+      workspaceFact("Branch", workspace.branch || "Not in Git"),
+      workspaceFact("Version", workspace.version || "Not detected"),
+      workspaceFact("Working tree", workspace.status_summary.length ? `${workspace.status_summary.length} change(s)` : "Clean"),
+    ].join("");
+    commitsTarget.innerHTML = workspace.recent_commits.length
+      ? workspace.recent_commits.map((commit) => `<div class="list-item">${escapeHtml(commit)}</div>`).join("")
+      : empty("No recent commits available.");
+    warningsTarget.innerHTML = workspace.warnings.length
+      ? workspace.warnings.map((warning) => `<div class="list-item error-state">${escapeHtml(warning)}</div>`).join("")
+      : empty("No workspace warnings.");
+  } catch (error) {
+    summaryTarget.innerHTML = errorMarkup(error.message);
+    commitsTarget.innerHTML = errorMarkup(error.message);
+    warningsTarget.innerHTML = errorMarkup(error.message);
+  }
+}
+
+async function searchWorkspace(event) {
+  event.preventDefault();
+  const query = byId("workspace-search").value.trim();
+  if (!query) return;
+  const target = byId("workspace-search-result");
+  try {
+    await withButton(event.submitter, async () => {
+      const result = await api("/workspace/search", {
+        method: "POST",
+        body: { query, max_results: 20 },
+      });
+      target.innerHTML = result.results.length
+        ? result.results.map((match) => `<div class="list-item">
+            <strong class="item-title">${escapeHtml(match.relative_path)}:${escapeHtml(match.line_number)}</strong>
+            <div>${escapeHtml(match.snippet)}</div>
+          </div>`).join("")
+        : empty("No safe workspace matches.");
+    });
+  } catch (error) {
+    target.innerHTML = errorMarkup(error.message);
+  }
+}
+
 async function loadState() {
   const target = byId("state-output");
   try {
@@ -497,8 +549,12 @@ async function recallMemory(event) {
   }
 }
 
-const READ_ONLY_LOADERS = {
+const DAILY_LOADERS = {
   context: loadContext,
+  workspace: loadWorkspace,
+};
+
+const DEVELOPER_LOADERS = {
   state: loadState,
   skills: loadSkills,
   dream: loadDream,
@@ -506,8 +562,27 @@ const READ_ONLY_LOADERS = {
   memory: loadMemory,
 };
 
+const READ_ONLY_LOADERS = { ...DAILY_LOADERS, ...DEVELOPER_LOADERS };
+let developerPanelsLoaded = false;
+
 async function loadAllReadOnlyPanels() {
-  await Promise.allSettled([loadHealth(), ...Object.values(READ_ONLY_LOADERS).map((loader) => loader())]);
+  const loaders = [loadHealth(), ...Object.values(DAILY_LOADERS).map((loader) => loader())];
+  if (byId("developer-mode").checked) {
+    loaders.push(...Object.values(DEVELOPER_LOADERS).map((loader) => loader()));
+    developerPanelsLoaded = true;
+  }
+  await Promise.allSettled(loaders);
+}
+
+async function toggleDeveloperMode(event) {
+  const enabled = event.currentTarget.checked;
+  document.querySelectorAll(".developer-panel").forEach((panel) => {
+    panel.hidden = !enabled;
+  });
+  if (enabled && !developerPanelsLoaded) {
+    developerPanelsLoaded = true;
+    await Promise.allSettled(Object.values(DEVELOPER_LOADERS).map((loader) => loader()));
+  }
 }
 
 function bindEvents() {
@@ -515,6 +590,8 @@ function bindEvents() {
   byId("generate-briefing").addEventListener("click", (event) => generateBriefing(event.currentTarget));
   byId("context-search-form").addEventListener("submit", searchContext);
   byId("context-remember-form").addEventListener("submit", rememberContext);
+  byId("workspace-search-form").addEventListener("submit", searchWorkspace);
+  byId("developer-mode").addEventListener("change", toggleDeveloperMode);
   byId("skill-form").addEventListener("submit", runSkill);
   byId("run-dream").addEventListener("click", (event) => runDream(event.currentTarget));
   byId("procedure-match-form").addEventListener("submit", matchProcedure);

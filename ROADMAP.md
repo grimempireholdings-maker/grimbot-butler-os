@@ -1,5 +1,13 @@
 # Roadmap
 
+## v0.10.5 - Capability Honesty and Conversation Modes
+
+- [x] Add an immutable runtime capability manifest to every provider prompt.
+- [x] Reject unsupported camera, screen, tab, device-layout, microphone, and physical-awareness claims.
+- [x] Classify conversation mode before memory/context retrieval.
+- [x] Keep casual and capability conversations free of unrelated business context.
+- [x] Add broad morning orientation, feedback correction, and rotating work-focus recommendations.
+
 ## Phase 0
 
 - [x] Brain Skeleton
@@ -63,6 +71,8 @@
 - [x] Context Search and Recall
 - [x] Conversational Maya Agent
 - [x] Natural Intent Routing
+- [x] Read-Only Workspace Awareness
+- [x] Console Developer Mode
 
 ## Phase 11
 

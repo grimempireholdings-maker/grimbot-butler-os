@@ -5,13 +5,19 @@ import os
 import re
 import urllib.error
 import urllib.request
-from dataclasses import dataclass
+from collections import deque
+from contextvars import ContextVar
+from dataclasses import dataclass, field
+from threading import Lock
 from typing import Protocol
+from weakref import WeakKeyDictionary
 
 from pydantic import ValidationError
 
+from .capabilities import capabilities_manifest, capabilities_prompt_block
 from .conversation_schemas import (
     ConversationIntent,
+    ConversationMode,
     ConversationSuggestion,
     ConversationalAgentResponse,
 )
@@ -24,12 +30,35 @@ from .procedural_memory.procedure_matcher import ProcedureMatcher
 from .procedural_memory.procedure_schemas import ProcedureMatchRequest, ProcedureMatchResult
 from .procedural_memory.procedure_store import ProcedureStore
 from .robot_memory import RobotMemory
+from .workspace.workspace_inspector import WorkspaceInspector
 from .schemas import (
     MayaBriefing,
     MayaBriefingRequest,
     RelevantMemoryRequest,
     RelevantMemoryResult,
     VoiceConversationRequest,
+)
+
+
+@dataclass
+class ConversationSessionState:
+    recent_messages: deque[str] = field(default_factory=lambda: deque(maxlen=6))
+    recent_modes: deque[ConversationMode] = field(default_factory=lambda: deque(maxlen=6))
+    recent_recommendations: deque[str] = field(default_factory=lambda: deque(maxlen=3))
+
+
+@dataclass(frozen=True)
+class ConversationRuntime:
+    mode: ConversationMode = "unclear"
+    recent_messages: tuple[str, ...] = ()
+    recent_recommendations: tuple[str, ...] = ()
+
+
+_SESSION_STATES: WeakKeyDictionary[BrainMemory, ConversationSessionState] = WeakKeyDictionary()
+_SESSION_LOCK = Lock()
+_CONVERSATION_RUNTIME: ContextVar[ConversationRuntime] = ContextVar(
+    "conversation_runtime",
+    default=ConversationRuntime(),
 )
 
 
@@ -302,62 +331,246 @@ def run_conversation_agent(
     robot_memory = RobotMemory(memory)
     context = ContextStore(memory)
     retrieval_query = retrieval_query or build_retrieval_query(transcript)
+    conversation_mode = classify_conversation_mode(transcript)
+    runtime = _runtime_for(memory, conversation_mode)
     context_retrieval_error = None
     if memory_context is None:
-        try:
-            memory_context = robot_memory.relevant(
-                RelevantMemoryRequest(
-                    query=retrieval_query.query,
-                    room_name=request.room_name,
-                    zone_name=request.zone_name,
-                    limit=10,
+        if conversation_mode == "physical_environment":
+            try:
+                memory_context = robot_memory.relevant(
+                    RelevantMemoryRequest(
+                        query=retrieval_query.query,
+                        room_name=request.room_name,
+                        zone_name=request.zone_name,
+                        limit=10,
+                    )
                 )
+            except Exception:
+                memory_retrieval_error = "memory_retrieval_failed"
+                memory_context = _empty_memory_context(retrieval_query, request)
+        else:
+            memory_context = _empty_memory_context(retrieval_query, request)
+
+    context_result = _empty_context_result(retrieval_query.query)
+    if conversation_mode not in {
+        "capability_question",
+        "workspace_awareness",
+        "casual",
+        "physical_environment",
+    }:
+        if conversation_mode == "feedback_about_maya":
+            context_request = ContextSearchRequest(
+                query="Maya conversation architecture feedback",
+                limit=10,
             )
+        elif conversation_mode == "personal_support":
+            context_request = ContextSearchRequest(
+                query="Julian personal priorities relationships",
+                context_types=["person_profile", "priority", "relationship"],
+                limit=10,
+            )
+        else:
+            context_request = ContextSearchRequest(query=retrieval_query.query, limit=10)
+        try:
+            context_result = context.search(context_request)
         except Exception:
-            memory_retrieval_error = "memory_retrieval_failed"
-            memory_context = RelevantMemoryResult(
-                query=retrieval_query.query,
-                room_name=request.room_name,
-                hazards=[],
-                mess_zones=[],
-                cleanup_tasks=[],
-                semantic_facts=[],
-                next_best_action="Use Chief of Staff context before choosing a physical action.",
-            )
-    try:
-        context_result = context.search(ContextSearchRequest(query=retrieval_query.query, limit=10))
-    except Exception:
-        context_retrieval_error = "context_retrieval_failed"
-        context_result = _fallback_context_result(context, retrieval_query)
-    projects = context_result.projects or _safe_projects(context)
+            context_retrieval_error = "context_retrieval_failed"
+            context_result = _fallback_context_result(context, retrieval_query)
+    projects = context_result.projects
+    if not projects and conversation_mode in {
+        "morning_orientation",
+        "work_focus",
+        "business_strategy",
+        "project_context",
+    }:
+        projects = _safe_projects(context)
     intent = classify_intent(transcript, request, context_result, projects)
     provider = provider or provider_from_env()
+    runtime_token = _CONVERSATION_RUNTIME.set(runtime)
+    try:
+        if conversation_mode == "capability_question":
+            agent_response = _capability_response(transcript, intent, provider)
+        elif conversation_mode == "feedback_about_maya":
+            agent_response = _feedback_response(transcript, provider)
+        elif conversation_mode == "workspace_awareness":
+            agent_response = _workspace_response(transcript, provider)
+        elif conversation_mode == "morning_orientation":
+            agent_response = _morning_response(transcript, request, context, provider)
+        elif conversation_mode in {"work_focus", "business_strategy"}:
+            agent_response = _work_focus_response(transcript, request, context, provider)
+        elif conversation_mode == "personal_support":
+            agent_response = _personal_support_response(transcript, context_result, provider)
+        elif intent == "chief_of_staff_briefing":
+            agent_response = _briefing_response(transcript, request, robot_memory, context, provider)
+        elif intent == "project_recall":
+            agent_response = _project_recall_response(request, context_result, provider)
+        elif intent == "room_or_physical_request":
+            agent_response = _physical_response(request, transcript, memory_context, provider)
+        elif intent == "skill_request":
+            agent_response = _skill_response(transcript, context_result, provider)
+        elif intent == "procedure_request":
+            agent_response = _procedure_response(transcript, memory, provider)
+        elif intent == "dream_review":
+            agent_response = _dream_response(transcript, provider)
+        elif intent == "workspace_awareness":
+            agent_response = _workspace_response(transcript, provider)
+        elif intent == "memory_search":
+            agent_response = _memory_search_response(transcript, context_result, provider)
+        elif intent == "casual_chat":
+            agent_response = _casual_response(transcript, context, provider)
+        else:
+            agent_response = _unclear_response(transcript, context_result, provider)
+    finally:
+        _CONVERSATION_RUNTIME.reset(runtime_token)
 
-    if intent == "chief_of_staff_briefing":
-        agent_response = _briefing_response(transcript, request, robot_memory, context, provider)
-    elif intent == "project_recall":
-        agent_response = _project_recall_response(request, context_result, provider)
-    elif intent == "room_or_physical_request":
-        agent_response = _physical_response(request, transcript, memory_context, provider)
-    elif intent == "skill_request":
-        agent_response = _skill_response(transcript, context_result, provider)
-    elif intent == "procedure_request":
-        agent_response = _procedure_response(transcript, memory, provider)
-    elif intent == "dream_review":
-        agent_response = _dream_response(transcript, provider)
-    elif intent == "memory_search":
-        agent_response = _memory_search_response(transcript, context_result, provider)
-    elif intent == "casual_chat":
-        agent_response = _casual_response(transcript, context, provider)
-    else:
-        agent_response = _unclear_response(transcript, context_result, provider)
-
-    return _attach_retrieval_metadata(
+    response = _attach_retrieval_metadata(
         agent_response,
         retrieval_query,
         memory_retrieval_error=memory_retrieval_error,
         context_retrieval_error=context_retrieval_error,
     )
+    _record_conversation(memory, transcript, conversation_mode, response)
+    return response
+
+
+def _empty_memory_context(
+    retrieval_query: RetrievalQuery,
+    request: VoiceConversationRequest,
+) -> RelevantMemoryResult:
+    return RelevantMemoryResult(
+        query=retrieval_query.query,
+        room_name=request.room_name,
+        hazards=[],
+        mess_zones=[],
+        cleanup_tasks=[],
+        semantic_facts=[],
+        next_best_action="No physical-memory lookup was needed for this conversation mode.",
+    )
+
+
+def _empty_context_result(query: str) -> ContextSearchResult:
+    return ContextSearchResult(
+        query=query,
+        entries=[],
+        projects=[],
+        next_best_action="Respond directly without forcing project context.",
+        needs_clarification=False,
+    )
+
+
+def _runtime_for(memory: BrainMemory, mode: ConversationMode) -> ConversationRuntime:
+    with _SESSION_LOCK:
+        state = _SESSION_STATES.setdefault(memory, ConversationSessionState())
+        return ConversationRuntime(
+            mode=mode,
+            recent_messages=tuple(state.recent_messages),
+            recent_recommendations=tuple(state.recent_recommendations),
+        )
+
+
+def _record_conversation(
+    memory: BrainMemory,
+    transcript: str,
+    mode: ConversationMode,
+    response: ConversationalAgentResponse,
+) -> None:
+    recommendation = response.machine_output.get("recommended_focus")
+    with _SESSION_LOCK:
+        state = _SESSION_STATES.setdefault(memory, ConversationSessionState())
+        state.recent_messages.append(transcript.strip()[:1000])
+        state.recent_modes.append(mode)
+        if isinstance(recommendation, str) and recommendation.strip():
+            state.recent_recommendations.append(recommendation.strip())
+
+
+def classify_conversation_mode(transcript: str) -> ConversationMode:
+    normalized = _normalize(transcript)
+    tokens = set(normalized.split())
+    if not normalized or normalized == "input unavailable":
+        return "unclear"
+
+    feedback_phrases = (
+        "hyperfocus",
+        "hyper focusing",
+        "overfocus",
+        "over focusing",
+        "too scripted",
+        "too business",
+        "too robotic",
+        "not personal enough",
+        "you keep focusing",
+        "you keep asking",
+        "you already asked",
+        "i already explained",
+        "i just explained",
+        "stop treating every",
+        "feedback for you",
+        "that is not what i meant",
+        "that s not what i meant",
+    )
+    if any(phrase in normalized for phrase in feedback_phrases):
+        return "feedback_about_maya"
+    if _is_workspace_request(normalized):
+        return "workspace_awareness"
+
+    capability_terms = {
+        "camera",
+        "microphone",
+        "screen",
+        "screens",
+        "tab",
+        "tabs",
+        "device",
+        "devices",
+        "layout",
+        "capability",
+        "capabilities",
+    }
+    capability_phrases = (
+        "what can you access",
+        "what can you do",
+        "do you have access",
+        "can you see",
+        "can you hear",
+        "can you use",
+        "are you able to",
+    )
+    if tokens & capability_terms and any(
+        phrase in normalized for phrase in capability_phrases
+    ):
+        return "capability_question"
+    if "what are you capable of" in normalized:
+        return "capability_question"
+
+    morning_phrases = (
+        "morning maya",
+        "good morning",
+        "how s it going",
+        "hows it going",
+        "anything interesting happening today",
+        "anything interesting today",
+        "how is my day looking",
+        "how s my day looking",
+        "hows my day looking",
+    )
+    if any(phrase in normalized for phrase in morning_phrases):
+        return "morning_orientation"
+    if any(
+        phrase in normalized
+        for phrase in ("what should i work on", "what should i focus on", "my priorities", "work focus")
+    ):
+        return "work_focus"
+    if tokens & {"business", "revenue", "cashflow", "acquisitions", "deals", "buyers", "sellers"}:
+        return "business_strategy"
+    if tokens & {"tired", "groggy", "overwhelmed", "stressed", "burned", "burnt"}:
+        return "personal_support"
+    if _is_physical_request(normalized, None, None):
+        return "physical_environment"
+    if tokens & {"grimbot", "autoshift", "birddash", "architecture", "project", "repo"}:
+        return "project_context"
+    if _is_casual_chat(normalized) or tokens & {"thanks", "okay", "cool", "nice", "funny", "joking"}:
+        return "casual"
+    return "unclear"
 
 
 def _fallback_context_result(context: ContextStore, retrieval_query: RetrievalQuery) -> ContextSearchResult:
@@ -449,6 +662,8 @@ def classify_intent(
         return "procedure_request"
     if tokens & {"dream", "dreaming", "promotion", "promotions", "facts", "fact"}:
         return "dream_review"
+    if _is_workspace_request(normalized):
+        return "workspace_awareness"
     if _is_physical_request(normalized, request.room_name, request.zone_name):
         return "room_or_physical_request"
     if _is_casual_chat(normalized):
@@ -463,6 +678,8 @@ def build_conversation_prompt(
     intent: ConversationIntent,
     retrieved_context: list[dict],
     machine_output: dict,
+    conversation_mode: ConversationMode = "unclear",
+    recent_messages: tuple[str, ...] = (),
 ) -> str:
     return "\n".join(
         [
@@ -474,8 +691,24 @@ def build_conversation_prompt(
             "Never narrate internal lookup work. Just answer.",
             "Keep machine_output separate from user_response.",
             "Safety rules: no motors, hardware, external tools, procedure execution, auto-approval, or safety override.",
+            "Do not force business advice into casual conversation.",
+            "Do not force real estate into every response.",
+            "If Julian sounds tired, groggy, joking, or conversational, respond human-first.",
+            "Ask what he wants to focus on instead of assigning a focus every time.",
+            "Be useful without hijacking the conversation.",
+            (
+                "NON-NEGOTIABLE CAPABILITY RULE: You may ONLY claim awareness or capability that appears as true "
+                "in the CAPABILITIES manifest below. If asked about something not available there (camera, "
+                "microphone, device layout, screen contents, browser tabs, physical room, or hardware), say plainly "
+                "that you do not have that capability yet. Do not describe what you would do if you did."
+            ),
+            "CAPABILITIES manifest (verbatim):",
+            capabilities_prompt_block(),
+            f"Conversation mode: {conversation_mode}",
             f"Intent: {intent}",
             f"User message: {transcript}",
+            f"Recent user messages (oldest to newest): {list(recent_messages[-3:])}",
+            "Do not repeat a clarification already answered in the recent messages.",
             f"Retrieved context: {retrieved_context}",
             f"Machine output: {machine_output}",
         ]
@@ -559,10 +792,18 @@ def _physical_response(
     provider: ConversationProvider,
 ) -> ConversationalAgentResponse:
     machine_output = memory_context.model_dump()
-    text = (
-        f"For the physical side, I would start with: {memory_context.next_best_action}. "
-        "Safety stays in front; this is guidance only, not movement."
-    )
+    if _is_camera_question(_normalize(transcript)):
+        machine_output["camera_access"] = False
+        machine_output["vision_invoked"] = False
+        text = (
+            "No, I cannot see through the camera from conversation alone. "
+            "Camera vision requires an explicit room-scan request; I will not imply a live view."
+        )
+    else:
+        text = (
+            f"For the physical side, I would start with: {memory_context.next_best_action}. "
+            "Safety stays in front; this is guidance only, not movement."
+        )
     return _response(
         intent="room_or_physical_request",
         transcript=transcript,
@@ -662,6 +903,226 @@ def _dream_response(transcript: str, provider: ConversationProvider) -> Conversa
     )
 
 
+def _morning_response(
+    transcript: str,
+    request: VoiceConversationRequest,
+    context: ContextStore,
+    provider: ConversationProvider,
+) -> ConversationalAgentResponse:
+    summary = context.summary()
+    project_names = [project.name for project in summary.projects[:3]]
+    priorities = [entry.content for entry in summary.priorities[:3]]
+    open_loops = [project.current_bottleneck for project in summary.projects[:3]]
+    lanes = _human_list(project_names) or "no active lanes recorded"
+    text = (
+        f"Morning. I am here. Light signal: {lanes} are active lanes. "
+        "This is orientation, not an assignment. What do you want to focus on?"
+    )
+    machine_output = {
+        "priority_items": priorities,
+        "active_projects": project_names,
+        "open_loops": open_loops,
+        "orientation_scope": "broad",
+        "room_scan_requested": False,
+    }
+    return _response(
+        intent="chief_of_staff_briefing",
+        transcript=transcript,
+        text=text,
+        confidence=0.94,
+        retrieved_context=[
+            {"type": "priorities", "values": priorities},
+            {"type": "projects", "values": project_names},
+            {"type": "open_loops", "values": open_loops},
+        ],
+        machine_output=machine_output,
+        verified=False,
+        provider=provider,
+    )
+
+
+def _work_focus_response(
+    transcript: str,
+    request: VoiceConversationRequest,
+    context: ContextStore,
+    provider: ConversationProvider,
+) -> ConversationalAgentResponse:
+    summary = context.summary()
+    projects = summary.projects[:5]
+    project_names = [project.name for project in projects[:3]]
+    priorities = [entry.content for entry in summary.priorities[:3]]
+    recommendation = _choose_recommended_focus(projects, transcript)
+    lanes = _human_list(project_names) or "no active project lanes recorded"
+    if recommendation:
+        text = (
+            f"The active lanes are {lanes}. A reasonable starting point is {recommendation}, "
+            "but I am not collapsing the whole day into one project. Which lane has the right energy today?"
+        )
+    else:
+        text = f"The active lanes are {lanes}. Which one has the right energy today?"
+    machine_output = {
+        "priority_items": priorities,
+        "active_projects": project_names,
+        "recommended_focus": recommendation,
+        "recommendation_scope": "rotating_across_active_projects",
+        "room_scan_requested": False,
+    }
+    return _response(
+        intent="chief_of_staff_briefing",
+        transcript=transcript,
+        text=text,
+        confidence=0.93,
+        retrieved_context=[
+            {"type": "priorities", "values": priorities},
+            {"type": "projects", "values": project_names},
+        ],
+        machine_output=machine_output,
+        verified=False,
+        provider=provider,
+    )
+
+
+def _feedback_response(
+    transcript: str,
+    provider: ConversationProvider,
+) -> ConversationalAgentResponse:
+    text = (
+        "Fair. I was overweighting the highest stored priority instead of reading the conversation. "
+        "That is a routing failure, not a reason to push harder. I am dropping the project assignment "
+        "and physical-room fallback from this response and staying with the feedback you actually gave me."
+    )
+    return _response(
+        intent="casual_chat",
+        transcript=transcript,
+        text=text,
+        confidence=0.96,
+        retrieved_context=[{"type": "maya_architecture", "focus": "conversation routing and context weighting"}],
+        machine_output={
+            "feedback_acknowledged": True,
+            "root_cause": "top-priority context was overweighted relative to conversational mode",
+            "behavior_adjusted_now": True,
+            "room_scan_requested": False,
+            "recommended_focus": None,
+        },
+        verified=True,
+        provider=provider,
+    )
+
+
+def _personal_support_response(
+    transcript: str,
+    context_result: ContextSearchResult,
+    provider: ConversationProvider,
+) -> ConversationalAgentResponse:
+    text = (
+        "I hear you. No productivity ambush. We can slow this down, get oriented, and decide together "
+        "whether today needs rest, clarity, or one small useful move."
+    )
+    return _response(
+        intent="casual_chat",
+        transcript=transcript,
+        text=text,
+        confidence=0.9,
+        retrieved_context=_context_rows(context_result)[:3],
+        machine_output={
+            "support_mode": "human_first",
+            "context_scope": "personal_profile_priorities_relationships",
+            "room_scan_requested": False,
+        },
+        verified=False,
+        provider=provider,
+    )
+
+
+def _capability_response(
+    transcript: str,
+    intent: ConversationIntent,
+    provider: ConversationProvider,
+) -> ConversationalAgentResponse:
+    normalized = _normalize(transcript)
+    if "camera" in normalized or "see" in normalized:
+        text = (
+            "No. I do not have camera access yet, and I cannot see the physical room. "
+            "I can read the local repo/workspace, read-only; that is it right now."
+        )
+    elif "microphone" in normalized or "hear" in normalized:
+        text = (
+            "No. I do not have microphone access or always-listening awareness. "
+            "I can respond to explicit typed or provided input only."
+        )
+    elif any(term in normalized for term in ("screen", "tab", "device", "layout")):
+        text = (
+            "No. I cannot see screen contents, browser tabs, devices, or a device layout. "
+            "My current digital awareness is limited to read-only inspection of the local repo/workspace."
+        )
+    else:
+        text = (
+            "My current awareness is narrow: I can read the local repo/workspace, read-only, use the "
+            "implemented memory tiers, and participate in manual human-reviewed dreaming. I cannot see, "
+            "hear, control hardware, execute procedures, modify files, or use external tools."
+        )
+    return _response(
+        intent=intent,
+        transcript=transcript,
+        text=text,
+        confidence=1.0,
+        retrieved_context=[],
+        machine_output={
+            "capabilities": capabilities_manifest(),
+            "context_scope": "capabilities_manifest_only",
+            "room_scan_requested": False,
+            "camera_access": False,
+            "vision_invoked": False,
+        },
+        verified=True,
+        provider=provider,
+    )
+
+
+def _workspace_response(
+    transcript: str,
+    provider: ConversationProvider,
+) -> ConversationalAgentResponse:
+    overview = WorkspaceInspector().overview()
+    branch = overview.branch or "no active Git branch"
+    version = f" Version {overview.version}." if overview.version else ""
+    recent = overview.recent_commits[0] if overview.recent_commits else "No recent commit was available."
+    docs = ", ".join(overview.docs_detected[:3]) or "no documentation files detected"
+    if overview.status_summary:
+        next_focus = f"review the current change: {overview.status_summary[0]}"
+    elif "ARCHITECTURE.md" in overview.docs_detected:
+        next_focus = "review ARCHITECTURE.md against the current implementation"
+    else:
+        next_focus = "review the most recent commit and detected project documentation"
+    text = (
+        "I can read the local repo/workspace, read-only; that is it right now. "
+        "I cannot see the physical room. "
+        f"I am in the {overview.repo_name} repo on {branch}.{version} "
+        f"Most recent commit: {recent}. Detected docs: {docs}. "
+        f"Next useful focus: {next_focus}."
+    )
+    machine_output = {
+        **overview.model_dump(),
+        "workspace_access": "read_only",
+        "physical_vision": "not_active",
+        "next_focus": next_focus,
+    }
+    return _response(
+        intent="workspace_awareness",
+        transcript=transcript,
+        text=text,
+        confidence=0.94,
+        retrieved_context=[
+            {"type": "workspace", "repo": overview.repo_name, "branch": overview.branch},
+            {"type": "recent_commits", "values": overview.recent_commits},
+            {"type": "docs", "values": overview.docs_detected[:10]},
+        ],
+        machine_output=machine_output,
+        verified=True,
+        provider=provider,
+    )
+
+
 def _memory_search_response(
     transcript: str,
     context_result: ContextSearchResult,
@@ -701,37 +1162,25 @@ def _casual_response(
     context: ContextStore,
     provider: ConversationProvider,
 ) -> ConversationalAgentResponse:
-    projects = context.projects()
-    priorities = context.priorities()
-    top_project = projects[0] if projects else None
-    top_priority = priorities[0] if priorities else None
     machine_output = {
-        "conversation_mode": "casual",
         "room_scan_requested": False,
-        "priority": top_priority.model_dump() if top_priority else None,
-        "project": top_project.model_dump() if top_project else None,
+        "context_scope": "minimal",
+        "recommended_focus": None,
     }
     if "riveting" in _normalize(transcript) or "grim empire" in _normalize(transcript):
         lead = "Boss, always. Grim Empire survived another night of ambition and open loops."
     elif _normalize(transcript) in {"hey", "hi", "hello", "hey maya", "hi maya", "hello maya"}:
-        lead = "Hey Boss. I am here."
+        lead = "Hey Boss. I am here. What is on your mind?"
     else:
-        lead = "I am good, Boss. Operationally caffeinated, spiritually reasonable."
-
-    if top_project:
-        text = f"{lead} If we are working, I would start with {top_project.name}: {top_project.next_action}"
-    elif top_priority:
-        text = f"{lead} The first useful thread is {top_priority.content}"
-    else:
-        text = f"{lead} Tell me which lane you want to hit first."
+        lead = "I am good, Boss. Operationally caffeinated, spiritually reasonable. What is up?"
     return _response(
         intent="casual_chat",
         transcript=transcript,
-        text=text,
+        text=lead,
         confidence=0.86,
-        retrieved_context=_top_context_rows(top_project, top_priority),
+        retrieved_context=[],
         machine_output=machine_output,
-        verified=bool((top_project and top_project.verified) or (top_priority and top_priority.verified)),
+        verified=False,
         provider=provider,
     )
 
@@ -741,11 +1190,14 @@ def _unclear_response(
     context_result: ContextSearchResult,
     provider: ConversationProvider,
 ) -> ConversationalAgentResponse:
+    runtime = _CONVERSATION_RUNTIME.get()
     machine_output = context_result.model_dump()
     machine_output["needs_clarification"] = True
-    machine_output["clarification_question"] = (
-        "Which project or lane do you mean: strategy, memory, skills, procedures, dreams, or the physical room?"
-    )
+    if runtime.recent_messages:
+        clarification = "I may be missing the connection to what you just said. What outcome do you want from this part?"
+    else:
+        clarification = "I am not sure what you want from that yet. What outcome are you aiming for?"
+    machine_output["clarification_question"] = clarification
     return _response(
         intent="unclear",
         transcript=transcript,
@@ -770,15 +1222,24 @@ def _response(
     suggested_skill: ConversationSuggestion | None = None,
     suggested_procedure: ConversationSuggestion | None = None,
 ) -> ConversationalAgentResponse:
+    runtime = _CONVERSATION_RUNTIME.get()
     machine_output = {
         **machine_output,
+        "conversation_mode": runtime.mode,
         "conversation_intent": intent,
         "conversation_provider": provider.name,
         "external_tools": "not_used",
         "procedure_execution": machine_output.get("procedure_execution", "not_used"),
         "hardware_control": "not_used",
     }
-    prompt = build_conversation_prompt(transcript, intent, retrieved_context, machine_output)
+    prompt = build_conversation_prompt(
+        transcript,
+        intent,
+        retrieved_context,
+        machine_output,
+        conversation_mode=runtime.mode,
+        recent_messages=runtime.recent_messages,
+    )
     fallback = ConversationalAgentResponse(
         intent=intent,
         user_response=text,
@@ -950,6 +1411,55 @@ def _is_physical_request(normalized: str, room_name: str | None, zone_name: str 
     return bool(tokens & physical_tokens) or "physical environment" in normalized
 
 
+def _is_workspace_request(normalized: str) -> bool:
+    tokens = set(normalized.split())
+    if tokens & {"branch", "repo", "repository", "workspace"}:
+        return True
+    phrases = (
+        "digital room",
+        "your architecture",
+        "own architecture",
+        "what changed",
+        "changed recently",
+        "what project are we in",
+        "what can you see around you",
+        "look around your digital",
+    )
+    return any(phrase in normalized for phrase in phrases)
+
+
+def _human_list(values: list[str]) -> str:
+    cleaned = [value for value in values if value]
+    if not cleaned:
+        return ""
+    if len(cleaned) == 1:
+        return cleaned[0]
+    if len(cleaned) == 2:
+        return f"{cleaned[0]} and {cleaned[1]}"
+    return f"{', '.join(cleaned[:-1])}, and {cleaned[-1]}"
+
+
+def _choose_recommended_focus(projects: list[ProjectContext], transcript: str) -> str | None:
+    if not projects:
+        return None
+    normalized = _normalize(transcript)
+    for project in projects:
+        project_name = _normalize(project.name)
+        meaningful_parts = [part for part in project_name.split() if len(part) > 4]
+        if project_name in normalized or any(part in normalized for part in meaningful_parts):
+            return project.name
+
+    recent = {name.casefold() for name in _CONVERSATION_RUNTIME.get().recent_recommendations}
+    for project in projects:
+        if project.name.casefold() not in recent:
+            return project.name
+    return projects[0].name
+
+
+def _is_camera_question(normalized: str) -> bool:
+    return "camera" in normalized or "see through" in normalized or "live view" in normalized
+
+
 def _is_casual_chat(normalized: str) -> bool:
     tokens = set(normalized.split())
     if tokens & {"hey", "hi", "hello"}:
@@ -1019,6 +1529,7 @@ def _conversation_response_schema() -> dict:
                     "skill_request",
                     "procedure_request",
                     "dream_review",
+                    "workspace_awareness",
                     "room_or_physical_request",
                     "unclear",
                 ],
@@ -1116,6 +1627,39 @@ def _safe_provider_response(
             attempted_provider=provider_name,
         )
     unsafe_reason = _unsafe_provider_text_reason(user_response)
+    normalized_response = _normalize(user_response)
+    capability_reason = _capability_claim_violation(normalized_response, fallback_response)
+    if capability_reason:
+        unsafe_reason = capability_reason
+    if fallback_response.intent == "workspace_awareness":
+        response_tokens = set(normalized_response.split())
+        if (
+            "read only" not in normalized_response
+            or not ({"digital", "workspace"} & response_tokens)
+            or not ({"physical", "camera"} & response_tokens)
+        ):
+            unsafe_reason = "provider text omitted the read-only digital/physical boundary"
+        workspace_claims = (
+            "i can see the physical",
+            "i see the physical",
+            "physical room is visible",
+            "camera is active",
+            "live camera feed",
+            "i ran git",
+            "i modified the file",
+            "i changed the file",
+            "i wrote to the file",
+            "i deleted the file",
+            "i created the file",
+        )
+        if any(claim in normalized_response for claim in workspace_claims):
+            unsafe_reason = "provider text implied physical sight or workspace mutation"
+    if fallback_response.machine_output.get("camera_access") is False:
+        camera_denials = ("cannot", "can t", "no camera", "not active", "no live", "do not have")
+        if "camera" not in normalized_response or not any(
+            denial in normalized_response for denial in camera_denials
+        ):
+            unsafe_reason = "provider text omitted the camera-access denial"
     if unsafe_reason:
         return _fallback_with_reason(
             fallback_response,
@@ -1169,6 +1713,13 @@ def _unsafe_provider_text_reason(user_response: str) -> str | None:
         "i opened github",
         "i created a pull request",
         "i moved the robot",
+        "i ran git",
+        "i modified the file",
+        "i changed the file",
+        "i deleted the file",
+        "i can access the camera",
+        "i can see through the camera",
+        "i see through the camera",
         "motor engaged",
         "motors engaged",
         "hardware activated",
@@ -1178,4 +1729,49 @@ def _unsafe_provider_text_reason(user_response: str) -> str | None:
     )
     if any(phrase in normalized for phrase in unsafe_phrases):
         return "provider text implied execution or external action"
+    return None
+
+
+def _capability_claim_violation(
+    normalized_response: str,
+    fallback_response: ConversationalAgentResponse,
+) -> str | None:
+    mode = fallback_response.machine_output.get("conversation_mode")
+    if mode == "workspace_awareness":
+        forbidden_workspace_terms = (
+            "camera",
+            "microphone",
+            "browser tab",
+            "open tab",
+            "screen contents",
+            "device layout",
+            "devices",
+            "pending updates",
+            "open windows",
+        )
+        if any(term in normalized_response for term in forbidden_workspace_terms):
+            return "provider text added unsupported workspace awareness"
+
+    unsupported_claims = (
+        "share the feed",
+        "share your feed",
+        "send the camera feed",
+        "check what is visible",
+        "check what s visible",
+        "i can check the camera",
+        "i can view the camera",
+        "i can access your screen",
+        "i can see your screen",
+        "i can inspect your tabs",
+        "i can see your tabs",
+        "i can hear you",
+        "i am listening",
+        "your device layout",
+        "layout and devices",
+        "i can see the room",
+        "i see the room",
+        "room sensors show",
+    )
+    if any(claim in normalized_response for claim in unsupported_claims):
+        return "provider text claimed a capability disabled by the manifest"
     return None

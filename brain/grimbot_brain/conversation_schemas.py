@@ -13,7 +13,22 @@ ConversationIntent = Literal[
     "skill_request",
     "procedure_request",
     "dream_review",
+    "workspace_awareness",
     "room_or_physical_request",
+    "unclear",
+]
+
+ConversationMode = Literal[
+    "casual",
+    "morning_orientation",
+    "work_focus",
+    "personal_support",
+    "business_strategy",
+    "project_context",
+    "workspace_awareness",
+    "physical_environment",
+    "feedback_about_maya",
+    "capability_question",
     "unclear",
 ]
 

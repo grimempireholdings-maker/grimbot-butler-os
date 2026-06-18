@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Maya Console</title>
   <link rel="icon" href="data:,">
-  <link rel="stylesheet" href="/console/assets/console.css?v=0.10.2">
+  <link rel="stylesheet" href="/console/assets/console.css?v=0.10.5">
 </head>
 <body>
   <header class="topbar">
@@ -14,6 +14,7 @@
       <h1>Maya Console</h1>
     </div>
     <div class="system-status">
+      <label class="developer-toggle"><input id="developer-mode" type="checkbox"> Developer Mode</label>
       <span id="health-dot" class="status-dot" aria-hidden="true"></span>
       <span id="health-label">Connecting</span>
       <button id="refresh-all" class="icon-button" type="button" title="Refresh all read-only panels" aria-label="Refresh all read-only panels">&#8635;</button>
@@ -106,7 +107,28 @@
       </div>
     </section>
 
-    <section class="panel state-panel" aria-labelledby="state-title">
+    <section class="panel wide-panel" aria-labelledby="workspace-title">
+      <div class="panel-heading">
+        <div>
+          <p class="section-kicker">Read-only digital awareness</p>
+          <h2 id="workspace-title">Workspace</h2>
+        </div>
+        <button class="secondary-button panel-refresh" data-refresh="workspace" type="button">Refresh Workspace</button>
+      </div>
+      <div id="workspace-summary" class="workspace-summary"><div class="empty-state">Loading workspace...</div></div>
+      <div class="split-view workspace-details">
+        <div><h3>Recent Commits</h3><div id="workspace-commits" class="item-list"></div></div>
+        <div><h3>Warnings</h3><div id="workspace-warnings" class="item-list"></div></div>
+      </div>
+      <form id="workspace-search-form" class="control-row">
+        <label class="sr-only" for="workspace-search">Search workspace</label>
+        <input id="workspace-search" maxlength="200" placeholder="Search safe project files..." required>
+        <button class="secondary-button" type="submit">Search Workspace</button>
+      </form>
+      <div id="workspace-search-result" class="result-box compact"><div class="empty-state">No workspace search yet.</div></div>
+    </section>
+
+    <section class="panel state-panel developer-panel" aria-labelledby="state-title" hidden>
       <div class="panel-heading">
         <div>
           <p class="section-kicker">Adaptive pressure</p>
@@ -117,7 +139,7 @@
       <div id="state-output" class="signal-grid"><div class="empty-state">Loading state...</div></div>
     </section>
 
-    <section class="panel skills-panel" aria-labelledby="skills-title">
+    <section class="panel skills-panel developer-panel" aria-labelledby="skills-title" hidden>
       <div class="panel-heading">
         <div>
           <p class="section-kicker">Manual capabilities</p>
@@ -141,7 +163,7 @@
       <div id="skills-output" class="result-box"><div class="empty-state">Select a skill to inspect it.</div></div>
     </section>
 
-    <section class="panel wide-panel" aria-labelledby="dream-title">
+    <section class="panel wide-panel developer-panel" aria-labelledby="dream-title" hidden>
       <div class="panel-heading">
         <div>
           <p class="section-kicker">Human-reviewed reflection</p>
@@ -165,7 +187,7 @@
       <div id="dream-result" class="inline-notice" hidden></div>
     </section>
 
-    <section class="panel wide-panel" aria-labelledby="procedure-title">
+    <section class="panel wide-panel developer-panel" aria-labelledby="procedure-title" hidden>
       <div class="panel-heading">
         <div>
           <p class="section-kicker">Storage and matching only</p>
@@ -191,7 +213,7 @@
       </div>
     </section>
 
-    <section class="panel wide-panel" aria-labelledby="memory-title">
+    <section class="panel wide-panel developer-panel" aria-labelledby="memory-title" hidden>
       <div class="panel-heading">
         <div>
           <p class="section-kicker">Robot recall</p>
@@ -214,6 +236,6 @@
   </main>
 
   <div id="toast" class="toast" role="status" aria-live="polite" hidden></div>
-  <script src="/console/assets/console.js?v=0.10.2" defer></script>
+  <script src="/console/assets/console.js?v=0.10.5" defer></script>
 </body>
 </html>
