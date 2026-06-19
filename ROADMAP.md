@@ -1,5 +1,22 @@
 # Roadmap
 
+## v0.11.0 - Ambient Companion Mode
+
+- [x] Extend the paired-history LLM classifier with six ambient conversation modes.
+- [x] Assemble priorities, approvals, recent commits, recent memories, time, and tone guidance read-only.
+- [x] Keep architecture and search mechanics subconscious in ordinary conversation.
+- [x] Add Ambient Mode to Maya Console, on by default, while preserving Developer Mode diagnostics.
+- [x] Permit one cached proactive weather lookup on `morning_ramp`; prohibit proactive news and all other new autonomous triggers.
+- [x] Add deterministic coverage and an opt-in `GRIMBOT_LIVE_TESTS=1` real-provider regression suite.
+
+## v0.10.8 - Classifier-Authorized Web Search
+
+- [x] Extend the LLM classification result with `needs_web_search` and a concise query.
+- [x] Add bounded Tavily snippet search with a five-second timeout and one-hour cache.
+- [x] Log search usage to episodic memory for review and dreaming.
+- [x] Inject results into deterministic machine output before provider response generation.
+- [x] Preserve honest failure behavior and prohibit arbitrary browsing, scraping, link following, and result execution.
+
 ## v0.10.5 - Capability Honesty and Conversation Modes
 
 - [x] Add an immutable runtime capability manifest to every provider prompt.

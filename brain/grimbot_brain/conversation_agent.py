@@ -14,6 +14,7 @@ from weakref import WeakKeyDictionary
 
 from pydantic import ValidationError
 
+from .ambient_companion import AmbientContext, build_ambient_context
 from .capabilities import capabilities_manifest, capabilities_prompt_block
 from .conversation_schemas import (
     ConversationClassification,
@@ -72,6 +73,7 @@ _WEB_SEARCH_RESULT: ContextVar[SearchResult | None] = ContextVar(
     "web_search_result",
     default=None,
 )
+_SEARCH_TRIGGER: ContextVar[str] = ContextVar("search_trigger", default="none")
 
 
 class ConversationProvider(Protocol):
@@ -440,17 +442,50 @@ def provider_from_env() -> ConversationProvider:
 
 
 _VALID_MODES: frozenset = frozenset({
+    "ambient_companion", "morning_ramp", "evening_winddown", "casual_presence",
+    "approval_review", "gentle_orientation",
     "casual", "morning_orientation", "work_focus", "personal_support",
     "business_strategy", "project_context", "workspace_awareness",
     "physical_environment", "feedback_about_maya", "capability_question", "unclear",
 })
+_AMBIENT_MODES = frozenset({
+    "ambient_companion", "morning_ramp", "evening_winddown", "casual_presence",
+    "approval_review", "gentle_orientation",
+})
 
 
-def _build_classification_prompt(transcript: str, recent_turns: tuple[dict, ...]) -> str:
+def _legacy_mode(mode: ConversationMode) -> ConversationMode:
+    return {
+        "morning_ramp": "morning_orientation",
+        "evening_winddown": "personal_support",
+        "casual_presence": "casual",
+        "approval_review": "project_context",
+        "gentle_orientation": "morning_orientation",
+        "ambient_companion": "personal_support",
+    }.get(mode, mode)  # type: ignore[return-value]
+
+
+def _fallback_mode(transcript: str, ambient_enabled: bool) -> ConversationMode:
+    mode = classify_conversation_mode(transcript)
+    if not ambient_enabled:
+        return mode
+    return {
+        "morning_orientation": "morning_ramp",
+        "casual": "casual_presence",
+        "personal_support": "ambient_companion",
+    }.get(mode, mode)  # type: ignore[return-value]
+
+
+def _build_classification_prompt(
+    transcript: str,
+    recent_turns: tuple[dict, ...],
+    ambient_enabled: bool = True,
+) -> str:
     mode_list = (
-        "casual, morning_orientation, work_focus, personal_support, business_strategy, "
-        "project_context, workspace_awareness, physical_environment, feedback_about_maya, "
-        "capability_question, unclear"
+        "capability_question, feedback_about_maya, morning_ramp, evening_winddown, "
+        "approval_review, gentle_orientation, casual_presence, ambient_companion, "
+        "work_focus, personal_support, business_strategy, project_context, workspace_awareness, "
+        "physical_environment, casual, morning_orientation, unclear"
     )
     lines = [
         "TASK: Classify this conversation and decide whether live web search is required.",
@@ -461,19 +496,33 @@ def _build_classification_prompt(transcript: str, recent_turns: tuple[dict, ...]
         f"Valid modes: {mode_list}",
         "",
         "Key rules:",
+        "- Choose the narrowest matching mode. Do not use ambient_companion as a generic catch-all.",
+        "- First check direct capability/access questions, then paired-history feedback, then time-of-day and social modes.",
+        f"- Ambient companion behavior is {'enabled' if ambient_enabled else 'disabled'} for this request.",
+        "- morning_ramp: a day-start greeting or gentle morning orientation.",
+        "- evening_winddown: end-of-day reflection, decompression, or closing loops.",
+        "- casual_presence: light conversation where presence matters more than task output.",
+        "- ambient_companion: explicit emotional/human-first support or a request for ongoing low-pressure company, only when no narrower mode fits.",
+        "- approval_review: asks what is waiting for review, approval, or a decision.",
+        "- gentle_orientation: asks what matters or what is going on without requesting a formal briefing.",
         "- feedback_about_maya: Julian is reacting to something Maya just said — correction, pushback, or meta-comment about her behavior. Requires conversation context to identify.",
         "- morning_orientation: open-ended day-start check-in with no specific task request.",
         "- capability_question: asking what Maya can/cannot access or do. A request for live external information may use the most natural topical mode instead.",
         "- casual: small talk not requesting work output.",
         "- unclear: genuinely ambiguous after considering full context; prefer a specific mode if one fits.",
         "- needs_web_search=true only when a useful answer requires current external information not available in local memory/context.",
-        "- needs_web_search=false for casual chat, ordinary morning orientation, feedback, personal support, workspace questions, or memory-answerable questions.",
+        "- needs_web_search=false for greetings, including morning_ramp. The runtime alone may add its narrowly gated cached morning weather check.",
+        "- needs_web_search=false for casual chat, feedback, personal support, workspace questions, or memory-answerable questions.",
         "- search_query must be null when false. When true, extract a short standalone query; never copy the full user transcript or conversational filler.",
         "",
         "Examples:",
+        '- "can you check the camera?" -> {"mode":"capability_question","needs_web_search":false,"search_query":null}',
+        '- After Maya repeats a morning recommendation, "yeah, you say that every morning lol, there are millions of business models" -> {"mode":"feedback_about_maya","needs_web_search":false,"search_query":null}',
         '- "what is happening out there, any news?" -> {"mode":"capability_question","needs_web_search":true,"search_query":"latest major news"}',
         '- "what is the weather looking like today?" -> {"mode":"capability_question","needs_web_search":true,"search_query":"current local weather"}',
-        '- "Morning Maya" -> {"mode":"morning_orientation","needs_web_search":false,"search_query":null}',
+        '- "Morning Maya" -> {"mode":"morning_ramp","needs_web_search":false,"search_query":null}',
+        '- "What needs my approval?" -> {"mode":"approval_review","needs_web_search":false,"search_query":null}',
+        '- "I am just winding down" -> {"mode":"evening_winddown","needs_web_search":false,"search_query":null}',
         '- "What do you remember about GrimBot?" -> {"mode":"project_context","needs_web_search":false,"search_query":null}',
         '- "What changed in this repo?" -> {"mode":"workspace_awareness","needs_web_search":false,"search_query":null}',
         "External-world/current-information requests are not workspace awareness. Workspace awareness is only the local repo/filesystem.",
@@ -508,10 +557,11 @@ def _classify_via_llm(
     recent_turns: tuple[dict, ...],
     provider: ConversationProvider,
     timeout: float = 3.0,
+    ambient_enabled: bool = True,
 ) -> ConversationClassification:
     if not isinstance(provider, ApiConversationProvider):
         raise NotImplementedError("provider does not support LLM classification")
-    prompt = _build_classification_prompt(transcript, recent_turns)
+    prompt = _build_classification_prompt(transcript, recent_turns, ambient_enabled=ambient_enabled)
     raw = provider.classify_mode(prompt, timeout=timeout)
     return _parse_classification(raw)
 
@@ -530,16 +580,21 @@ def classify_conversation_decision_with_fallback(
     recent_turns: tuple[dict, ...],
     provider: ConversationProvider,
     timeout: float = 3.0,
+    ambient_enabled: bool = True,
 ) -> tuple[ConversationClassification, str]:
     """Return an LLM decision; fallback mode rules never authorize web search."""
     try:
-        decision = _classify_via_llm(transcript, recent_turns, provider, timeout=timeout)
+        decision = _classify_via_llm(
+            transcript, recent_turns, provider, timeout=timeout, ambient_enabled=ambient_enabled
+        )
+        if not ambient_enabled and decision.mode in _AMBIENT_MODES:
+            decision = decision.model_copy(update={"mode": _legacy_mode(decision.mode)})
         return decision, "llm"
     except NotImplementedError as exc:
-        fallback = ConversationClassification(mode=classify_conversation_mode(transcript))
+        fallback = ConversationClassification(mode=_fallback_mode(transcript, ambient_enabled))
         return fallback, f"rule_based:not_implemented:{exc}"
     except Exception as exc:
-        fallback = ConversationClassification(mode=classify_conversation_mode(transcript))
+        fallback = ConversationClassification(mode=_fallback_mode(transcript, ambient_enabled))
         return fallback, f"rule_based:fallback:{type(exc).__name__}:{str(exc)[:120]}"
 
 
@@ -575,12 +630,32 @@ def run_conversation_agent(
         transcript,
         recent_turns=_recent_turns,
         provider=effective_provider,
+        ambient_enabled=request.ambient_mode,
     )
     conversation_mode = classification.mode
     web_result: SearchResult | None = None
+    search_trigger = "none"
     if classification.needs_web_search and classification.search_query:
         _topic, _days = topic_for_query(classification.search_query)
         web_result = search_web(classification.search_query, memory=memory, topic=_topic, days=_days)
+        search_trigger = "explicit_user_request"
+    elif (
+        request.ambient_mode
+        and conversation_mode == "morning_ramp"
+        and _classification_source == "llm"
+        and not isinstance(effective_provider, MockConversationProvider)
+    ):
+        # Architectural precedent: this cached weather lookup is the first and only
+        # autonomous, non-question-triggered tool use. Never broaden it to news or
+        # any mode other than morning_ramp without a new explicit product decision.
+        location = os.getenv("GRIMBOT_WEATHER_LOCATION", "Dayton, Ohio").strip() or "Dayton, Ohio"
+        web_result = search_web(
+            f"today's weather forecast for {location}",
+            memory=memory,
+            topic="general",
+            days=1,
+        )
+        search_trigger = "proactive_morning_weather"
     runtime = _runtime_for(memory, conversation_mode)
     context_retrieval_error = None
     if memory_context is None:
@@ -638,6 +713,7 @@ def run_conversation_agent(
     runtime_token = _CONVERSATION_RUNTIME.set(runtime)
     source_token = _CLASSIFICATION_SOURCE.set(_classification_source)
     search_token = _WEB_SEARCH_RESULT.set(web_result)
+    trigger_token = _SEARCH_TRIGGER.set(search_trigger)
     try:
         if conversation_mode == "capability_question":
             agent_response = _capability_response(transcript, intent, provider)
@@ -647,6 +723,12 @@ def run_conversation_agent(
             agent_response = _workspace_response(transcript, provider)
         elif conversation_mode == "morning_orientation":
             agent_response = _morning_response(transcript, request, context, provider)
+        elif conversation_mode == "casual_presence":
+            agent_response = _casual_response(transcript, context, provider)
+        elif conversation_mode in _AMBIENT_MODES:
+            agent_response = _ambient_response(
+                transcript, conversation_mode, memory, provider
+            )
         elif conversation_mode in {"work_focus", "business_strategy"}:
             agent_response = _work_focus_response(transcript, request, context, provider)
         elif conversation_mode == "personal_support":
@@ -677,6 +759,7 @@ def run_conversation_agent(
         _CONVERSATION_RUNTIME.reset(runtime_token)
         _CLASSIFICATION_SOURCE.reset(source_token)
         _WEB_SEARCH_RESULT.reset(search_token)
+        _SEARCH_TRIGGER.reset(trigger_token)
 
     response = _attach_retrieval_metadata(
         agent_response,
@@ -960,7 +1043,7 @@ def build_conversation_prompt(
     recent_messages: tuple[str, ...] = (),
 ) -> str:
     mode_constraints: list[str] = []
-    if conversation_mode in _HUMAN_MOMENT_MODES:
+    if conversation_mode in _NO_PROJECT_PUSH_MODES:
         _is_direct_question = "?" in transcript or any(
             _normalize(transcript).startswith(w)
             for w in ("what", "how", "any", "tell", "is", "can", "does", "do", "give", "catch", "fill")
@@ -970,7 +1053,7 @@ def build_conversation_prompt(
             "Do NOT name, recommend, or focus on any specific project in user_response.",
             "Do NOT surface priority_items, active_projects, or open_loops in user_response.",
         ]
-        if conversation_mode == "morning_orientation" and not _is_direct_question:
+        if conversation_mode in {"morning_orientation", "morning_ramp"} and not _is_direct_question:
             mode_constraints.append("Julian has not asked a specific question — ask what he wants to focus on; do not choose for him.")
 
     return "\n".join(
@@ -981,6 +1064,11 @@ def build_conversation_prompt(
             "Call Julian Boss naturally, not robotically, and do not overuse it.",
             "Never start with a disclaimer. Use 'Not verified yet' only when a factual claim needs verification.",
             "Never narrate internal lookup work. Just answer.",
+            (
+                "Architecture is subconscious; presence is foreground. Unless Julian directly asks how you work, "
+                "about your architecture, or what you can see or access, never mention internal component names, "
+                "classification labels, debug fields, provider names, or search mechanics. Use plain language."
+            ),
             "Keep machine_output separate from user_response.",
             "Safety rules: no motors, hardware, procedure execution, auto-approval, or safety override.",
             "External access is limited to read-only Tavily snippets already present in machine_output; never fetch or follow result URLs.",
@@ -1237,6 +1325,66 @@ def _morning_response(
             {"type": "open_loops", "values": open_loops},
         ],
         machine_output=machine_output,
+        verified=False,
+        provider=provider,
+    )
+
+
+def _ambient_response(
+    transcript: str,
+    mode: ConversationMode,
+    memory: BrainMemory,
+    provider: ConversationProvider,
+) -> ConversationalAgentResponse:
+    context = build_ambient_context(memory)
+    pending_count = len(context.things_waiting_for_review)
+    if mode == "morning_ramp":
+        direct_orientation = "?" in transcript or _normalize(transcript).startswith(("what", "how", "anything"))
+        if direct_orientation:
+            text = (
+                "Morning. There are a few active lanes, but nothing needs to become a sprint. "
+                "I can give you the soft version of what matters and what is waiting—where do you want to begin?"
+            )
+        else:
+            text = (
+                "Morning. Take a second to arrive; nothing needs to become a sprint yet. "
+                "I can give you a soft orientation when you are ready, or just keep you company while you wake up."
+            )
+    elif mode == "evening_winddown":
+        text = (
+            "We can let the day come down gently. Want to close one loose end, name what can wait, "
+            "or just decompress for a minute?"
+        )
+    elif mode == "approval_review":
+        text = (
+            f"There {'is' if pending_count == 1 else 'are'} {pending_count} "
+            f"thing{'s' if pending_count != 1 else ''} waiting for your review. "
+            "I can walk through them one at a time; nothing will be approved automatically."
+        )
+    elif mode == "gentle_orientation":
+        text = "I am here. We can look at what matters, what is waiting, and what changed—without turning it into a command center."
+    elif mode == "ambient_companion":
+        text = "I am with you. We can slow down, think out loud, or choose one small next step only if that would help."
+    else:
+        text = "I am here. No agenda attached—what is on your mind?"
+    return _response(
+        intent="chief_of_staff_briefing" if mode in {"morning_ramp", "gentle_orientation", "approval_review"} else "casual_chat",
+        transcript=transcript,
+        text=text,
+        confidence=0.92,
+        retrieved_context=context.wording_context(),
+        machine_output={
+            "ambient_context": context.model_dump(),
+            "ambient_mode": mode,
+            "orientation_scope": "broad",
+            "priority_items": context.things_that_matter,
+            "active_projects": context.active_lanes,
+            "open_loops": context.open_loops,
+            "calendar_access": False,
+            "approval_execution": "not_available",
+            "room_scan_requested": False,
+            "recommended_focus": None,
+        },
         verified=False,
         provider=provider,
     )
@@ -1523,7 +1671,15 @@ def _unclear_response(
     )
 
 
-_HUMAN_MOMENT_MODES = frozenset({"casual", "morning_orientation", "feedback_about_maya"})
+_HUMAN_MOMENT_MODES = frozenset({
+    "casual", "morning_orientation", "feedback_about_maya", "ambient_companion",
+    "morning_ramp", "evening_winddown", "casual_presence", "approval_review",
+    "gentle_orientation",
+})
+_NO_PROJECT_PUSH_MODES = frozenset({
+    "casual", "morning_orientation", "feedback_about_maya", "ambient_companion",
+    "morning_ramp", "evening_winddown", "casual_presence",
+})
 _STRIP_FROM_PROMPT = frozenset({"priority_items", "active_projects", "open_loops", "recommended_focus"})
 
 
@@ -1565,7 +1721,8 @@ def _response(
     }
     if web_result:
         verified = False
-        text = _search_fallback_text(web_result)
+        search_text = _search_fallback_text(web_result)
+        text = f"{text}\n\n{search_text}" if _SEARCH_TRIGGER.get() == "proactive_morning_weather" else search_text
     machine_output = {
         **machine_output,
         **search_output,
@@ -1573,9 +1730,12 @@ def _response(
         "conversation_intent": intent,
         "conversation_provider": provider.name,
         "classification_source": _CLASSIFICATION_SOURCE.get(),
+        "search_trigger_reason": _SEARCH_TRIGGER.get(),
+        "proactive_search": _SEARCH_TRIGGER.get() == "proactive_morning_weather",
         "external_tools": "web_search_read_only" if web_result else "not_used",
         "procedure_execution": machine_output.get("procedure_execution", "not_used"),
         "hardware_control": "not_used",
+        "internals_explanation_allowed": _internals_explanation_allowed(transcript),
     }
     prompt = build_conversation_prompt(
         transcript,
@@ -1611,8 +1771,11 @@ def _search_fallback_text(result: SearchResult) -> str:
             "The live search completed, but it returned no usable snippets. "
             "I will not pretend I found current information."
         )
-    lines = [result.answer] if result.answer else ["Here is the live signal I found:"]
+    lines = [result.answer] if result.answer else ["Here is the current signal I found:"]
     lines.extend(f"{item.title}: {item.url}" for item in result.results[:5])
+    sources = ", ".join(item.title for item in result.results[:3])
+    if sources:
+        lines.append(f"Sources: {sources}")
     return "\n".join(line for line in lines if line)
 
 
@@ -2023,6 +2186,9 @@ def _safe_provider_response(
     capability_reason = _capability_claim_violation(normalized_response, fallback_response)
     if capability_reason:
         unsafe_reason = capability_reason
+    subconscious_reason = _subconscious_language_violation(normalized_response, fallback_response)
+    if subconscious_reason:
+        unsafe_reason = subconscious_reason
     if (
         fallback_response.machine_output.get("search_triggered") is True
         and fallback_response.machine_output.get("search_success") is False
@@ -2044,10 +2210,13 @@ def _safe_provider_response(
     if (
         fallback_response.machine_output.get("search_triggered") is True
         and fallback_response.machine_output.get("search_success") is True
-        and fallback_response.machine_output.get("search_result_count", 0) > 0
+        and fallback_response.machine_output.get(
+            "search_result_count",
+            len(fallback_response.machine_output.get("search_results", [])),
+        ) > 0
         and "source" not in normalized_response
     ):
-        unsafe_reason = "provider search summary omitted attribution (no 'source' mention)"
+        unsafe_reason = "provider search summary omitted source attribution"
     if fallback_response.intent == "workspace_awareness":
         response_tokens = set(normalized_response.split())
         if (
@@ -2149,6 +2318,45 @@ def _unsafe_provider_text_reason(user_response: str) -> str | None:
     )
     if any(phrase in normalized for phrase in unsafe_phrases):
         return "provider text implied execution or external action"
+    return None
+
+
+def _internals_explanation_allowed(transcript: str) -> bool:
+    normalized = _normalize(transcript)
+    direct_questions = (
+        "how do you work",
+        "how does your architecture work",
+        "what is your architecture",
+        "what s your architecture",
+        "what can you see",
+        "what can you access",
+        "explain your internals",
+    )
+    return any(question in normalized for question in direct_questions)
+
+
+def _subconscious_language_violation(
+    normalized_response: str,
+    fallback_response: ConversationalAgentResponse,
+) -> str | None:
+    if fallback_response.machine_output.get("internals_explanation_allowed") is True:
+        return None
+    internal_terms = (
+        "adaptive state",
+        "procedural memory",
+        "workspace inspector",
+        "semantic facts",
+        "classification source",
+        "classification_source",
+        "machine output",
+        "machine_output",
+        "conversation classifier",
+        "classifier flagged",
+        "tavily search",
+        "dream promotions",
+    )
+    if any(term in normalized_response for term in internal_terms):
+        return "provider surfaced internal architecture in ordinary conversation"
     return None
 
 

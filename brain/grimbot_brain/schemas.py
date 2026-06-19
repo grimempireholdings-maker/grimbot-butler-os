@@ -251,6 +251,7 @@ class VoiceConversationRequest(BaseModel):
     assistant_mode: AssistantMode = "maya_chief_of_staff"
     response_mode: MayaResponseMode = "default"
     verified: bool = False
+    ambient_mode: bool = True
 
 
 class SpeechToTextResult(BaseModel):

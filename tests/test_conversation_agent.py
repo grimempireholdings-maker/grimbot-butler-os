@@ -433,6 +433,22 @@ class FakeApiProvider(ApiConversationProvider):
         return self.raw_text
 
 
+class RetryApiProvider(FakeApiProvider):
+    def __init__(self, responses: list[str]) -> None:
+        super().__init__(responses[0])
+        object.__setattr__(self, "responses", responses)
+        object.__setattr__(self, "prompts", [])
+
+    def _call(
+        self,
+        prompt: str,
+        fallback_response: ConversationalAgentResponse,
+        api_key: str,
+    ) -> str:
+        self.prompts.append(prompt)
+        return self.responses.pop(0)
+
+
 @pytest.mark.parametrize(
     "provider_text",
     [
@@ -534,6 +550,23 @@ def test_valid_provider_json_can_only_replace_user_response(tmp_path, monkeypatc
     assert result.verified is False
 
 
+def test_minimal_provider_wording_json_preserves_authoritative_state(tmp_path, monkeypatch) -> None:
+    monkeypatch.setenv("OPENAI_API_KEY", "test-key")
+    result = run_conversation_agent(
+        request=VoiceConversationRequest(push_to_talk=True, mock_transcript="Hey Maya"),
+        transcript="Hey Maya",
+        memory=BrainMemory(tmp_path / "memory.sqlite3"),
+        provider=FakeApiProvider(json.dumps({"user_response": "Minimal provider wording."})),
+    )
+
+    assert result.user_response == "Minimal provider wording."
+    assert result.intent == "casual_chat"
+    assert result.machine_output["conversation_provider"] == "openai"
+    assert result.machine_output["provider_response"] == "validated"
+    assert result.machine_output["external_tools"] == "not_used"
+    assert result.verified is False
+
+
 def test_openrouter_valid_response_only_replaces_user_response(tmp_path, monkeypatch) -> None:
     monkeypatch.setenv("OPENROUTER_API_KEY", "test-key")
     monkeypatch.setenv("OPENROUTER_MODEL", "openrouter/auto")
@@ -622,8 +655,7 @@ def test_openrouter_call_uses_required_endpoint_headers_and_model(monkeypatch) -
     assert captured["headers"]["HTTP-Referer"] == "https://example.test"
     assert captured["headers"]["X-OpenRouter-Title"] == "GrimBot Butler OS"
     assert captured["payload"]["model"] == "openrouter/auto"
-    assert captured["payload"]["response_format"]["type"] == "json_schema"
-    assert captured["payload"]["response_format"]["json_schema"]["strict"] is True
+    assert captured["payload"]["response_format"]["type"] == "json_object"
     assert json.loads(raw_text)["user_response"] == "Provider text."
 
 
@@ -752,6 +784,35 @@ def test_invalid_provider_json_falls_back_safely(tmp_path, monkeypatch) -> None:
     assert "not json" not in result.user_response.lower()
 
 
+def test_invalid_provider_json_gets_one_bounded_correction_retry(tmp_path, monkeypatch) -> None:
+    monkeypatch.setenv("OPENAI_API_KEY", "test-key")
+    valid = json.dumps(
+        {
+            "intent": "casual_chat",
+            "user_response": "Corrected valid provider response.",
+            "confidence": 0.8,
+            "retrieved_context": [],
+            "suggested_skill": None,
+            "suggested_procedure": None,
+            "machine_output": {},
+            "verified": False,
+        }
+    )
+    provider = RetryApiProvider(["not json", valid])
+
+    result = run_conversation_agent(
+        request=VoiceConversationRequest(push_to_talk=True, mock_transcript="Hey Maya"),
+        transcript="Hey Maya",
+        memory=BrainMemory(tmp_path / "memory.sqlite3"),
+        provider=provider,
+    )
+
+    assert result.user_response == "Corrected valid provider response."
+    assert result.machine_output["provider_response"] == "validated"
+    assert len(provider.prompts) == 2
+    assert "CORRECTION" in provider.prompts[1]
+
+
 def test_openrouter_invalid_response_falls_back_safely(tmp_path, monkeypatch) -> None:
     monkeypatch.setenv("OPENROUTER_API_KEY", "test-key")
 
@@ -871,7 +932,7 @@ def test_feed_sharing_capability_claim_triggers_safe_fallback(tmp_path, monkeypa
 def test_morning_orientation_is_broad_and_not_real_estate_default(tmp_path) -> None:
     result = _chat(tmp_path, "Morning Maya")
 
-    assert result.machine_output["conversation_mode"] == "morning_orientation"
+    assert result.machine_output["conversation_mode"] == "morning_ramp"
     assert result.machine_output["orientation_scope"] == "broad"
     assert len(result.machine_output["active_projects"]) >= 2
     assert result.machine_output.get("recommended_focus") is None
@@ -880,7 +941,7 @@ def test_morning_orientation_is_broad_and_not_real_estate_default(tmp_path) -> N
 def test_interesting_today_orients_across_multiple_lanes(tmp_path) -> None:
     result = _chat(tmp_path, "Anything interesting happening today?")
 
-    assert result.machine_output["conversation_mode"] == "morning_orientation"
+    assert result.machine_output["conversation_mode"] == "morning_ramp"
     assert len(result.machine_output["active_projects"]) >= 2
     assert "active lanes" in result.speech_output.text.lower()
 

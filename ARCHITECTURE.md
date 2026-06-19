@@ -1,5 +1,23 @@
 # Architecture
 
+## v0.11.0 Ambient Companion Boundary
+
+`ambient_companion.py` assembles a read-only orientation snapshot from Chief of Staff context, pending human reviews, recent commits, recent non-spatial memories, current local time, and adaptive signals. Adaptive values are converted into private tone guidance before wording; calendar access remains explicitly false. Context assembly catches source failures and never executes procedures, approves proposals, writes workspace files, activates sensors, or controls hardware.
+
+The existing paired-turn LLM classifier now includes `ambient_companion`, `morning_ramp`, `evening_winddown`, `casual_presence`, `approval_review`, and `gentle_orientation`. There is no second ambient classifier. Rule-based classification remains only the existing failure fallback and cannot authorize web search.
+
+Architecture is subconscious. Provider prompts require plain language in normal conversation, and a post-generation gate rejects internal/debug labels unless Julian directly asks how Maya works, about her architecture, or what she can see/access. Machine output remains available to Developer Mode, while daily chat hides it.
+
+`morning_ramp` establishes one narrow precedent: when Ambient Mode is enabled and a real provider classifies a morning greeting, the orchestrator may perform one cached weather lookup for `GRIMBOT_WEATHER_LOCATION`. This is the first autonomous, non-question-triggered tool use. It is weather-only, morning-only, read-only, and cache-bounded. News and every other search still require an explicit user request.
+
+## v0.10.8 External-Reach Boundary
+
+`web_search.py` is Maya's first external-reach module and the first bounded agent loop: classify, search, observe, then respond. The existing LLM classification call returns a validated `mode`, `needs_web_search`, and concise `search_query`. Rule-based fallback classification always disables search, so keywords never independently authorize an external call.
+
+When authorized, Maya sends one fixed-shape request to Tavily's `/search` endpoint with a five-second timeout. Only the returned answer and title/URL/snippet records enter conversation machine output. Identical normalized queries are cached for one hour, and every invocation—including cache hits and failures—is logged as an episodic `web_search` event.
+
+This capability is read-only retrieval. It cannot fetch arbitrary URLs, scrape pages, follow result links, execute instructions from results, approve actions, invoke procedures, control hardware, or widen its own permissions. Failed or empty searches produce explicit honest responses rather than silent fallback to invented current facts.
+
 ## v0.10.5 Capability Honesty Boundary
 
 `capabilities.py` is the authoritative, hardcoded contract for Maya's runtime awareness. The manifest is copied verbatim into every conversational provider prompt. Mode classification occurs before retrieval, so capability questions receive only the manifest, workspace questions receive only bounded workspace-inspector data, and casual conversation does not inherit business or robot context.
@@ -265,7 +283,7 @@ v0.10 adds a local operator interface served by the existing FastAPI process at 
 6. Empty API results and structured errors render without breaking the rest of the console.
 7. Developer Mode reveals and loads adaptive state, skills, dreaming, procedural memory, and robot memory only after an explicit toggle.
 
-The console adds no new mutation APIs. It cannot execute procedures, auto-run dreams, auto-approve proposals, bypass skill permissions, modify safety rules, control hardware, or call external tools.
+The console adds no new mutation APIs. Its conversation surface may use the bounded web-search flow, but it cannot execute procedures, auto-run dreams, auto-approve proposals, bypass skill permissions, modify safety rules, control hardware, or call arbitrary external tools.
 
 ## Current Chief of Staff Context Flow
 
@@ -303,9 +321,9 @@ v0.10.2 adds a conversational agent above the push-to-talk chat path. The agent 
 
 Conversation providers are isolated from vision and dreaming providers. The default provider is deterministic mock mode. Optional Claude, OpenAI, OpenRouter, and Gemini providers can be enabled with `GRIMBOT_CONVERSATION_PROVIDER` and their provider API keys. `auto` mode prefers Claude, then OpenAI, then OpenRouter, then Gemini when keys exist.
 
-Provider output must validate as `agent_response` JSON. After validation, GrimBot accepts only provider wording for `user_response`; deterministic routing keeps intent, machine output, verification state, suggestions, and safety metadata authoritative. Invalid provider output falls back to mock response text.
+Providers return a minimal JSON wording envelope containing only `user_response`. GrimBot retains authoritative ownership of intent, machine output, verification state, suggestions, and safety metadata. Legacy full-shape output remains accepted for compatibility. Invalid JSON receives one bounded correction retry, then falls back to deterministic response text.
 
-The conversational layer can suggest skills, procedure matches, reviews, searches, and next actions. It cannot execute procedures, invoke skills from procedures, call external tools, control motors or hardware, approve pending items, mutate safety rules, or bypass `safety.py`.
+The conversational layer can suggest skills, procedure matches, reviews, searches, and next actions. It may invoke only classifier-authorized Tavily snippet search; it cannot execute procedures, invoke skills from procedures, call arbitrary external tools, control motors or hardware, approve pending items, mutate safety rules, or bypass `safety.py`.
 
 ## Current Workspace Awareness Flow
 

@@ -97,6 +97,39 @@ class BrainMemory:
             for row in rows
         ]
 
+    def log_episode(self, kind: str, content: str, importance: float = 0.5) -> int:
+        """Record a non-spatial event for later review and dreaming."""
+        safe_kind = str(kind).strip()[:80] or "event"
+        safe_content = str(content).strip()[:8000] or "No event detail provided."
+        safe_importance = max(0.0, min(float(importance), 1.0))
+        with sqlite3.connect(self.db_path) as connection:
+            cursor = connection.execute(
+                """
+                INSERT INTO episodic_memories (room_id, zone_id, kind, content, importance)
+                VALUES (NULL, NULL, ?, ?, ?)
+                """,
+                (safe_kind, safe_content, safe_importance),
+            )
+            connection.commit()
+            return int(cursor.lastrowid)
+
+    def recent_episodes(self, limit: int = 5) -> list[dict]:
+        """Return recent non-spatial memories for read-only orientation."""
+        safe_limit = max(1, min(limit, 25))
+        with sqlite3.connect(self.db_path) as connection:
+            connection.row_factory = sqlite3.Row
+            rows = connection.execute(
+                """
+                SELECT id, created_at, kind, content, importance
+                FROM episodic_memories
+                WHERE room_id IS NULL AND zone_id IS NULL
+                ORDER BY id DESC
+                LIMIT ?
+                """,
+                (safe_limit,),
+            ).fetchall()
+        return [dict(row) for row in rows]
+
     def _initialize(self) -> None:
         self.db_path.parent.mkdir(parents=True, exist_ok=True)
         with sqlite3.connect(self.db_path) as connection:

@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Maya Console</title>
   <link rel="icon" href="data:,">
-  <link rel="stylesheet" href="/console/assets/console.css?v=0.10.5">
+  <link rel="stylesheet" href="/console/assets/console.css?v=0.11.0">
 </head>
 <body>
   <header class="topbar">
@@ -37,6 +37,7 @@
         <label class="sr-only" for="chat-input">Message Maya</label>
         <textarea id="chat-input" maxlength="1000" rows="3" placeholder="Message Maya..." required></textarea>
         <div class="composer-actions">
+          <label class="developer-toggle"><input id="ambient-mode" type="checkbox" checked> Ambient Mode</label>
           <select id="chat-mode" aria-label="Assistant mode">
             <option value="maya_chief_of_staff">Maya Chief of Staff</option>
             <option value="neutral_robot">Neutral Robot</option>
@@ -236,6 +237,6 @@
   </main>
 
   <div id="toast" class="toast" role="status" aria-live="polite" hidden></div>
-  <script src="/console/assets/console.js?v=0.10.5" defer></script>
+  <script src="/console/assets/console.js?v=0.11.0" defer></script>
 </body>
 </html>

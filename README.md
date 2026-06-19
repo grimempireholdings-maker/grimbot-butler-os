@@ -21,6 +21,8 @@ Create a safe, affordable personal robotic assistant capable of perception, memo
 - [x] Chief of Staff Context
 - [x] Conversational Maya Agent
 - [x] Read-Only Workspace Awareness
+- [x] Classifier-Authorized Web Search
+- [x] Ambient Companion Mode
 - [ ] External Tool Use
 - [ ] Rover Platform
 - [ ] Object Manipulation
@@ -57,12 +59,25 @@ Phase 10.4 adds Maya Workspace Awareness: bounded read-only inspection of the ac
 
 Phase 10.5 adds capability honesty and conversation modes. A hardcoded capability manifest is included in every provider prompt, unsupported awareness claims are rejected after generation, and casual, morning, feedback, work-focus, workspace, physical, and capability conversations retrieve only mode-appropriate context. Maya no longer treats Real Estate Acquisitions as the universal fallback.
 
+Phase 10.8 adds Maya's first bounded external-world capability: classifier-authorized Tavily web search. Search is read-only snippet retrieval with a five-second timeout, one-hour cache, episodic usage logging, structured machine output, and honest failure behavior. It does not browse pages, scrape arbitrary URLs, follow links, or execute result content.
+
+Phase 11 adds Ambient Companion Mode v0.11.0. Six new modes flow through the existing paired-history LLM classifier, daily orientation assembles read-only context behind the scenes, and ordinary wording is protected from internal/debug vocabulary. Ambient Mode is on by default in Maya Console; Developer Mode remains the explicit place for architecture and search diagnostics. A morning greeting may perform one cached weather lookup. This is the only autonomous, non-question-triggered search; proactive news is not enabled.
+
 LLM output is never connected directly to motors. Every movement command must pass through `brain/grimbot_brain/safety.py`.
 
 By default, local cycle logs are stored at `memory/grimbot_brain.sqlite3`.
 Approved room-scan images are stored under `vision/images` by default. The API does not accept arbitrary file uploads.
 
 ## Setup
+
+Create a free Tavily API key at [tavily.com](https://tavily.com), copy `.env.example` to `.env`, and set:
+
+```env
+TAVILY_API_KEY=your_key_here
+GRIMBOT_WEATHER_LOCATION=Dayton, Ohio
+```
+
+Without this key, classifier-authorized searches fail closed and Maya states that live search did not return rather than fabricating current information.
 
 ```powershell
 python -m venv .venv
@@ -115,7 +130,7 @@ http://127.0.0.1:8000/console
 
 The console initially loads daily-use Chief of Staff context and read-only workspace awareness. Adaptive state, skills, dreaming, procedural memory, and robot memory are hidden and unloaded until Developer Mode is enabled. Chat, briefings, skill runs, dream cycles, review decisions, procedure matching, workspace search, and memory recall occur only after an explicit operator action.
 
-The console does not add autonomous execution, procedure execution, motors, hardware control, external tools, or automatic approval. Skill permissions and all existing safety boundaries remain authoritative.
+The console does not add autonomous execution, procedure execution, motors, hardware control, or automatic approval. Conversation may perform only classifier-authorized, read-only Tavily snippet search; skill permissions and all other safety boundaries remain authoritative.
 
 Console chat uses the v0.10.2 conversational Maya agent. Casual chat stays conversational, day/planning questions route to Chief of Staff briefing, named-project questions use context recall, and room scanning appears only for explicit physical, cleaning, vision, hazard, sensor, or robot requests.
 
@@ -140,7 +155,7 @@ git status --short
 git log --oneline -5
 ```
 
-Workspace awareness is digital and read-only. It is not physical camera vision, command execution, file editing, or an external-tool capability.
+Workspace awareness is digital, local, and read-only. It remains separate from web search and is not physical camera vision, command execution, or file editing.
 
 ## Run CLI Demo
 
@@ -335,9 +350,9 @@ OpenRouter uses `OPENROUTER_MODEL`, defaulting to `openrouter/auto`, and may inc
 
 Or use `GRIMBOT_CONVERSATION_PROVIDER=auto` to prefer Claude, then OpenAI, then OpenRouter, then Gemini when keys exist. The default remains `mock`, even if API keys are present.
 
-LLM conversation output must validate as the existing `agent_response` JSON schema. If validation fails, Maya falls back to the deterministic mock response. Even valid provider output can only replace `user_response`; intent, machine output, verification state, skill/procedure suggestions, and safety metadata remain controlled by GrimBot.
+LLM conversation wording uses a minimal JSON envelope containing only `user_response`. Legacy full-shape responses remain accepted for compatibility, but provider output can never replace intent, machine output, verification state, skill/procedure suggestions, or safety metadata. Malformed JSON receives one bounded correction retry before Maya falls back to deterministic wording.
 
-Maya may suggest skills, procedures, searches, reviews, and next actions. She may not execute procedures, call external tools, control hardware, approve changes, or override `safety.py`.
+Maya may suggest skills, procedures, reviews, and next actions. The only implemented external call is classifier-authorized Tavily snippet search; she may not execute procedures, follow search links, call arbitrary external tools, control hardware, approve changes, or override `safety.py`.
 
 ## Skills Registry
 

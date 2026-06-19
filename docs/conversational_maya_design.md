@@ -1,5 +1,19 @@
 # Conversational Maya Agent Design
 
+## v0.11.0 Presence Layer
+
+The existing paired-history classifier now recognizes six ambient modes: `ambient_companion`, `morning_ramp`, `evening_winddown`, `casual_presence`, `approval_review`, and `gentle_orientation`. They are modes in the same decision object as all other conversation behavior, not a parallel router.
+
+Ambient responses lead with the human moment. Tired, groggy, overwhelmed, excited, and conversational messages do not trigger a productivity ambush or force a named project. Feedback about Maya is acknowledged and applied in the same response. Daily context may quietly inform wording, but internal labels, classifier mechanics, provider names, and search mechanics stay out of ordinary speech. Direct architecture and capability questions are the explicit exception.
+
+Maya Console sends `ambient_mode=true` by default. Turning it off maps ambient classifications back to compatible legacy modes. Developer Mode alone reveals machine output and internal diagnostics.
+
+## v0.10.8 Search Decision and Observation Loop
+
+The same LLM call that classifies conversation mode now emits a strict decision object: `mode`, `needs_web_search`, and `search_query`. The query is normalized through the bounded retrieval-query path before use. A provider failure falls back to rule-based mode classification with web search disabled; no keyword path can authorize external reach.
+
+When search is authorized, the orchestrator calls Tavily before response generation and injects structured results into `machine_output`. The wording provider may summarize those snippets and must cite source titles and URLs. It cannot follow links or treat snippets as executable instructions. Search failure replaces the normal fallback response with an explicit statement that Maya tried and received no result.
+
 ## v0.10.5 Capability Manifest and Honesty Layer
 
 Maya's capabilities are an application-owned contract, never an LLM inference. `grimbot_brain.capabilities.CAPABILITIES` records which forms of awareness are active. The current release permits bounded, read-only local repository/workspace inspection and the implemented memory tiers. It explicitly denies camera, microphone, screen/tab, device-layout, robot-body, physical-room sensor, workspace-write, procedure-execution, and external-tool access.
@@ -68,14 +82,14 @@ The voice endpoint keeps legacy fields too:
 - `speech_output.text` uses the conversational text.
 - `machine_output` remains separate and collapsed in the console.
 
-For real providers, the model is asked to return the same structured JSON shape. The response is validated with the existing Pydantic schema. After validation, only `user_response` is accepted from the provider; intent, confidence, retrieved context, suggestions, machine output, and verification state remain controlled by GrimBot.
+Real providers return only a minimal `{"user_response":"..."}` JSON envelope. This prevents large authoritative machine output—especially search results—from being echoed and truncated. Legacy full-shape responses remain valid for compatibility, but only `user_response` is accepted; intent, confidence, retrieved context, suggestions, machine output, and verification state remain controlled by GrimBot. Malformed JSON receives one bounded correction retry before deterministic fallback.
 
 ## Safety Boundaries
 
 The agent may suggest skills, procedure matches, dream review, memory search, and next actions. It may not:
 
 - execute procedures
-- run external tools
+- run external tools other than classifier-authorized, read-only Tavily snippet search
 - control motors or hardware
 - approve dream facts or pending procedures
 - bypass skill permissions

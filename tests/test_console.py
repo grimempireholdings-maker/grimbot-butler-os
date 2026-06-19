@@ -113,9 +113,9 @@ def test_console_chat_uses_voice_conversation_agent_response() -> None:
     assert 'api("/voice/conversation"' in script
     assert "result.agent_response?.user_response" in script
     assert script.index("result.agent_response?.user_response") < script.index("result.maya_response?.user_response")
-    assert "/console/assets/console.js?v=0.10.5" in html
-    assert "/console/assets/console.css?v=0.10.5" in html
-    assert main_module.app.version == "0.10.5"
+    assert "/console/assets/console.js?v=0.11.0" in html
+    assert "/console/assets/console.css?v=0.11.0" in html
+    assert main_module.app.version == "0.11.0"
 
 
 def test_console_route_disables_html_cache() -> None:
@@ -187,6 +187,9 @@ def test_console_workspace_panel_and_developer_mode_defaults() -> None:
     assert 'data-refresh="workspace"' in html
     assert 'id="workspace-search-form"' in html
     assert 'id="developer-mode"' in html
+    assert 'id="ambient-mode" type="checkbox" checked' in html
+    assert 'ambient_mode: byId("ambient-mode").checked' in script
+    assert 'class="machine-debug"' in script
     assert html.count("developer-panel") == 5
     assert html.count("developer-panel\" aria-labelledby") == 5
     assert html.count("hidden>") >= 5

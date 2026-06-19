@@ -79,8 +79,9 @@ async function loadHealth() {
 function addChatMessage(kind, text, machineOutput = null) {
   const log = byId("chat-log");
   if (log.querySelector(".empty-state")) log.innerHTML = "";
+  const developerMode = byId("developer-mode").checked;
   const machine = machineOutput
-    ? `<details><summary>Machine output</summary><pre>${escapeHtml(formatJson(machineOutput))}</pre></details>`
+    ? `<details class="machine-debug" ${developerMode ? "" : "hidden"}><summary>Machine output</summary><pre>${escapeHtml(formatJson(machineOutput))}</pre></details>`
     : "";
   log.insertAdjacentHTML("beforeend", `<div class="message ${kind}">
     <span class="speaker">${kind === "user" ? "Julian" : "Maya"}</span>
@@ -108,6 +109,7 @@ async function sendChat(event) {
           push_to_talk: true,
           mock_transcript: text,
           assistant_mode: byId("chat-mode").value,
+          ambient_mode: byId("ambient-mode").checked,
           verified: false,
         },
       });
@@ -578,6 +580,9 @@ async function toggleDeveloperMode(event) {
   const enabled = event.currentTarget.checked;
   document.querySelectorAll(".developer-panel").forEach((panel) => {
     panel.hidden = !enabled;
+  });
+  document.querySelectorAll(".machine-debug").forEach((details) => {
+    details.hidden = !enabled;
   });
   if (enabled && !developerPanelsLoaded) {
     developerPanelsLoaded = true;
