@@ -32,6 +32,7 @@ class SearchItem(BaseModel):
     title: str = Field(min_length=1, max_length=500)
     url: str = Field(min_length=1, max_length=2000)
     snippet: str = Field(default="", max_length=4000)
+    published_date: str | None = Field(default=None, max_length=100)
 
 
 class SearchResult(BaseModel):
@@ -227,7 +228,8 @@ def _parse_items(payload: dict, max_results: int) -> list[SearchItem]:
         if not title or not url or not url.startswith(("http://", "https://")):
             continue
         snippet = _optional_text(raw.get("content"), 4000) or ""
-        items.append(SearchItem(title=title, url=url, snippet=snippet))
+        published_date = _optional_text(raw.get("published_date"), 100)
+        items.append(SearchItem(title=title, url=url, snippet=snippet, published_date=published_date))
     return items
 
 

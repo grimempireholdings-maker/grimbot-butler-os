@@ -1869,6 +1869,7 @@ def _provider_user_prompt(prompt: str, fallback_response: ConversationalAgentRes
             "Do not return intent, confidence, retrieved_context, suggestions, machine_output, or verified.",
             "Do not start casual replies with a disclaimer.",
             "Keep user_response under 600 characters — it is spoken aloud. For news or multi-item results, pick the 2-3 most relevant and give each in one sentence.",
+            "When machine_output contains search_results, you MUST end user_response with 'Sources: [outlet names]' — extract outlet names from the result titles or URLs in machine_output. Never present web search content as your own knowledge.",
         ]
     )
 
@@ -2040,6 +2041,13 @@ def _safe_provider_response(
             term in normalized_response for term in failure_terms
         ):
             unsafe_reason = "provider text concealed or contradicted the failed search"
+    if (
+        fallback_response.machine_output.get("search_triggered") is True
+        and fallback_response.machine_output.get("search_success") is True
+        and fallback_response.machine_output.get("search_result_count", 0) > 0
+        and "source" not in normalized_response
+    ):
+        unsafe_reason = "provider search summary omitted attribution (no 'source' mention)"
     if fallback_response.intent == "workspace_awareness":
         response_tokens = set(normalized_response.split())
         if (
