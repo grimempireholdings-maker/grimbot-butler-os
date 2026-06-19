@@ -295,14 +295,7 @@ class OpenRouterConversationProvider(ApiConversationProvider):
                 {"role": "system", "content": _provider_system_prompt()},
                 {"role": "user", "content": _provider_user_prompt(prompt, fallback_response)},
             ],
-            "response_format": {
-                "type": "json_schema",
-                "json_schema": {
-                    "name": "conversational_agent_response",
-                    "strict": True,
-                    "schema": _conversation_response_schema(),
-                },
-            },
+            "response_format": {"type": "json_object"},
             "max_tokens": _provider_max_tokens(),
             "temperature": 0.4,
         }
@@ -592,6 +585,8 @@ def run_conversation_agent(
             agent_response = _work_focus_response(transcript, request, context, provider)
         elif conversation_mode == "personal_support":
             agent_response = _personal_support_response(transcript, context_result, provider)
+        elif conversation_mode == "casual":
+            agent_response = _casual_response(transcript, context, provider)
         elif intent == "chief_of_staff_briefing":
             agent_response = _briefing_response(transcript, request, robot_memory, context, provider)
         elif intent == "project_recall":
@@ -1320,7 +1315,7 @@ def _capability_response(
             "capabilities": capabilities_manifest(),
             "context_scope": "capabilities_manifest_only",
             "room_scan_requested": False,
-            "camera_access": False,
+            "camera_access": not ("camera" in normalized or "see" in normalized),
             "vision_invoked": False,
         },
         verified=True,
@@ -1775,7 +1770,7 @@ def _conversation_response_schema() -> dict:
         "additionalProperties": False,
         "properties": {
             "name": {"type": "string"},
-            "confidence": {"type": "number", "minimum": 0, "maximum": 1},
+            "confidence": {"type": "number"},
             "required_permission": {"type": "string"},
             "reason": {"type": "string"},
         },
@@ -1801,7 +1796,7 @@ def _conversation_response_schema() -> dict:
                 ],
             },
             "user_response": {"type": "string"},
-            "confidence": {"type": "number", "minimum": 0, "maximum": 1},
+            "confidence": {"type": "number"},
             "retrieved_context": {
                 "type": "array",
                 "items": {"type": "object", "additionalProperties": True},
