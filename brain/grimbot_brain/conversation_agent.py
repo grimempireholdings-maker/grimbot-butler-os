@@ -16,6 +16,7 @@ from pydantic import ValidationError
 
 from .capabilities import capabilities_manifest, capabilities_prompt_block
 from .conversation_schemas import (
+    ConversationClassification,
     ConversationIntent,
     ConversationMode,
     ConversationSuggestion,
@@ -31,6 +32,7 @@ from .procedural_memory.procedure_schemas import ProcedureMatchRequest, Procedur
 from .procedural_memory.procedure_store import ProcedureStore
 from .robot_memory import RobotMemory
 from .workspace.workspace_inspector import WorkspaceInspector
+from .web_search import SearchResult, search_web, topic_for_query
 from .schemas import (
     MayaBriefing,
     MayaBriefingRequest,
@@ -65,6 +67,10 @@ _CONVERSATION_RUNTIME: ContextVar[ConversationRuntime] = ContextVar(
 _CLASSIFICATION_SOURCE: ContextVar[str] = ContextVar(
     "classification_source",
     default="unknown",
+)
+_WEB_SEARCH_RESULT: ContextVar[SearchResult | None] = ContextVar(
+    "web_search_result",
+    default=None,
 )
 
 
@@ -104,13 +110,29 @@ class ApiConversationProvider:
             )
         try:
             raw_text = self._call(prompt, fallback_response, api_key)
-            parsed = _validated_llm_response(raw_text)
         except Exception as exc:
             return _fallback_with_reason(
                 fallback_response,
                 f"{self.name} provider fallback: {exc}",
                 attempted_provider=self.name,
             )
+        try:
+            parsed = _validated_llm_response(raw_text, fallback_response)
+        except Exception as first_exc:
+            correction_prompt = (
+                f"{prompt}\n\nCORRECTION: Your previous response was not valid JSON. "
+                "Return only one valid JSON object matching the exact response shape supplied below. "
+                "Do not use markdown fences or add prose outside the object."
+            )
+            try:
+                corrected_text = self._call(correction_prompt, fallback_response, api_key)
+                parsed = _validated_llm_response(corrected_text, fallback_response)
+            except Exception as retry_exc:
+                return _fallback_with_reason(
+                    fallback_response,
+                    f"{self.name} provider fallback after JSON correction retry: {retry_exc}; first error: {first_exc}",
+                    attempted_provider=self.name,
+                )
         return _safe_provider_response(fallback_response, parsed, self.name)
 
     def _call(
@@ -142,7 +164,7 @@ class ClaudeConversationProvider(ApiConversationProvider):
     def _call_classification(self, prompt: str, api_key: str, timeout: float) -> str:
         payload = {
             "model": self._classifier_model(),
-            "max_tokens": 64,
+            "max_tokens": 160,
             "temperature": 0,
             "messages": [{"role": "user", "content": prompt}],
         }
@@ -199,7 +221,7 @@ class OpenAIConversationProvider(ApiConversationProvider):
         payload = {
             "model": self._classifier_model(),
             "messages": [{"role": "user", "content": prompt}],
-            "max_tokens": 64,
+            "max_tokens": 160,
             "temperature": 0,
         }
         response = _post_json(
@@ -229,7 +251,7 @@ class OpenAIConversationProvider(ApiConversationProvider):
                 "format": {
                     "type": "json_schema",
                     "name": "conversational_agent_response",
-                    "schema": _conversation_response_schema(),
+                    "schema": _provider_wording_schema(),
                     "strict": True,
                 }
             },
@@ -258,7 +280,7 @@ class OpenRouterConversationProvider(ApiConversationProvider):
         payload = {
             "model": self._classifier_model(),
             "messages": [{"role": "user", "content": prompt}],
-            "max_tokens": 64,
+            "max_tokens": 160,
             "temperature": 0,
         }
         headers: dict[str, str] = {"Authorization": f"Bearer {api_key}"}
@@ -324,7 +346,7 @@ class GeminiConversationProvider(ApiConversationProvider):
         model = self._classifier_model()
         payload = {
             "contents": [{"role": "user", "parts": [{"text": prompt}]}],
-            "generationConfig": {"temperature": 0, "maxOutputTokens": 64},
+            "generationConfig": {"temperature": 0, "maxOutputTokens": 160},
         }
         response = _post_json(
             f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent?key={api_key}",
@@ -356,7 +378,7 @@ class GeminiConversationProvider(ApiConversationProvider):
                 "temperature": 0.4,
                 "maxOutputTokens": _provider_max_tokens(),
                 "responseMimeType": "application/json",
-                "responseSchema": _conversation_response_schema(),
+                "responseSchema": _provider_wording_schema(),
             },
         }
         response = _post_json(
@@ -431,16 +453,30 @@ def _build_classification_prompt(transcript: str, recent_turns: tuple[dict, ...]
         "capability_question, unclear"
     )
     lines = [
-        "TASK: Output exactly one mode name from the list below. No explanation, no punctuation, no other text.",
+        "TASK: Classify this conversation and decide whether live web search is required.",
+        "Return exactly one JSON object with keys: mode, needs_web_search, search_query.",
+        'Example: {"mode":"project_context","needs_web_search":true,"search_query":"concise live-information query"}',
+        "No markdown, explanation, or extra keys.",
         "",
         f"Valid modes: {mode_list}",
         "",
         "Key rules:",
         "- feedback_about_maya: Julian is reacting to something Maya just said — correction, pushback, or meta-comment about her behavior. Requires conversation context to identify.",
         "- morning_orientation: open-ended day-start check-in with no specific task request.",
-        "- capability_question: asking what Maya can/cannot access or do; also covers requests for external data (news, weather, internet) she does not have.",
+        "- capability_question: asking what Maya can/cannot access or do. A request for live external information may use the most natural topical mode instead.",
         "- casual: small talk not requesting work output.",
         "- unclear: genuinely ambiguous after considering full context; prefer a specific mode if one fits.",
+        "- needs_web_search=true only when a useful answer requires current external information not available in local memory/context.",
+        "- needs_web_search=false for casual chat, ordinary morning orientation, feedback, personal support, workspace questions, or memory-answerable questions.",
+        "- search_query must be null when false. When true, extract a short standalone query; never copy the full user transcript or conversational filler.",
+        "",
+        "Examples:",
+        '- "what is happening out there, any news?" -> {"mode":"capability_question","needs_web_search":true,"search_query":"latest major news"}',
+        '- "what is the weather looking like today?" -> {"mode":"capability_question","needs_web_search":true,"search_query":"current local weather"}',
+        '- "Morning Maya" -> {"mode":"morning_orientation","needs_web_search":false,"search_query":null}',
+        '- "What do you remember about GrimBot?" -> {"mode":"project_context","needs_web_search":false,"search_query":null}',
+        '- "What changed in this repo?" -> {"mode":"workspace_awareness","needs_web_search":false,"search_query":null}',
+        "External-world/current-information requests are not workspace awareness. Workspace awareness is only the local repo/filesystem.",
         "",
     ]
     if recent_turns:
@@ -451,7 +487,7 @@ def _build_classification_prompt(transcript: str, recent_turns: tuple[dict, ...]
         lines.append("")
     lines.append(f'Current message from Julian: "{transcript}"')
     lines.append("")
-    lines.append("Mode:")
+    lines.append("Classification JSON:")
     return "\n".join(lines)
 
 
@@ -472,12 +508,39 @@ def _classify_via_llm(
     recent_turns: tuple[dict, ...],
     provider: ConversationProvider,
     timeout: float = 3.0,
-) -> ConversationMode:
+) -> ConversationClassification:
     if not isinstance(provider, ApiConversationProvider):
         raise NotImplementedError("provider does not support LLM classification")
     prompt = _build_classification_prompt(transcript, recent_turns)
     raw = provider.classify_mode(prompt, timeout=timeout)
-    return _parse_mode(raw)
+    return _parse_classification(raw)
+
+
+def _parse_classification(raw: str) -> ConversationClassification:
+    payload = json.loads(_extract_json_object(raw))
+    decision = ConversationClassification.model_validate(payload)
+    if decision.needs_web_search and decision.search_query:
+        short_query = build_retrieval_query(decision.search_query).query[:240]
+        decision = decision.model_copy(update={"search_query": short_query})
+    return decision
+
+
+def classify_conversation_decision_with_fallback(
+    transcript: str,
+    recent_turns: tuple[dict, ...],
+    provider: ConversationProvider,
+    timeout: float = 3.0,
+) -> tuple[ConversationClassification, str]:
+    """Return an LLM decision; fallback mode rules never authorize web search."""
+    try:
+        decision = _classify_via_llm(transcript, recent_turns, provider, timeout=timeout)
+        return decision, "llm"
+    except NotImplementedError as exc:
+        fallback = ConversationClassification(mode=classify_conversation_mode(transcript))
+        return fallback, f"rule_based:not_implemented:{exc}"
+    except Exception as exc:
+        fallback = ConversationClassification(mode=classify_conversation_mode(transcript))
+        return fallback, f"rule_based:fallback:{type(exc).__name__}:{str(exc)[:120]}"
 
 
 def classify_conversation_mode_with_fallback(
@@ -486,14 +549,11 @@ def classify_conversation_mode_with_fallback(
     provider: ConversationProvider,
     timeout: float = 3.0,
 ) -> tuple[ConversationMode, str]:
-    """Return (mode, source) where source is 'llm' or 'rule_based:<reason>'."""
-    try:
-        mode = _classify_via_llm(transcript, recent_turns, provider, timeout=timeout)
-        return mode, "llm"
-    except NotImplementedError as exc:
-        return classify_conversation_mode(transcript), f"rule_based:not_implemented:{exc}"
-    except Exception as exc:
-        return classify_conversation_mode(transcript), f"rule_based:fallback:{type(exc).__name__}:{str(exc)[:120]}"
+    """Compatibility wrapper returning only mode and classification source."""
+    decision, source = classify_conversation_decision_with_fallback(
+        transcript, recent_turns, provider, timeout=timeout
+    )
+    return decision.mode, source
 
 
 def run_conversation_agent(
@@ -511,11 +571,16 @@ def run_conversation_agent(
     effective_provider = provider or provider_from_env()
     with _SESSION_LOCK:
         _recent_turns = tuple(_SESSION_STATES.get(memory, ConversationSessionState()).recent_turns)
-    conversation_mode, _classification_source = classify_conversation_mode_with_fallback(
+    classification, _classification_source = classify_conversation_decision_with_fallback(
         transcript,
         recent_turns=_recent_turns,
         provider=effective_provider,
     )
+    conversation_mode = classification.mode
+    web_result: SearchResult | None = None
+    if classification.needs_web_search and classification.search_query:
+        _topic, _days = topic_for_query(classification.search_query)
+        web_result = search_web(classification.search_query, memory=memory, topic=_topic, days=_days)
     runtime = _runtime_for(memory, conversation_mode)
     context_retrieval_error = None
     if memory_context is None:
@@ -572,6 +637,7 @@ def run_conversation_agent(
     provider = effective_provider
     runtime_token = _CONVERSATION_RUNTIME.set(runtime)
     source_token = _CLASSIFICATION_SOURCE.set(_classification_source)
+    search_token = _WEB_SEARCH_RESULT.set(web_result)
     try:
         if conversation_mode == "capability_question":
             agent_response = _capability_response(transcript, intent, provider)
@@ -610,6 +676,7 @@ def run_conversation_agent(
     finally:
         _CONVERSATION_RUNTIME.reset(runtime_token)
         _CLASSIFICATION_SOURCE.reset(source_token)
+        _WEB_SEARCH_RESULT.reset(search_token)
 
     response = _attach_retrieval_metadata(
         agent_response,
@@ -915,7 +982,8 @@ def build_conversation_prompt(
             "Never start with a disclaimer. Use 'Not verified yet' only when a factual claim needs verification.",
             "Never narrate internal lookup work. Just answer.",
             "Keep machine_output separate from user_response.",
-            "Safety rules: no motors, hardware, external tools, procedure execution, auto-approval, or safety override.",
+            "Safety rules: no motors, hardware, procedure execution, auto-approval, or safety override.",
+            "External access is limited to read-only Tavily snippets already present in machine_output; never fetch or follow result URLs.",
             "Do not force business advice into casual conversation.",
             "Do not force real estate into every response.",
             "If Julian sounds tired, groggy, joking, or conversational, respond human-first.",
@@ -924,18 +992,19 @@ def build_conversation_prompt(
             *mode_constraints,
             (
                 "NON-NEGOTIABLE CAPABILITY RULE: Do not claim capabilities you do not have. "
-                "You have read-only local workspace access only. No camera, microphone, internet, screen, "
-                "browser tabs, device layout, physical room, or external tools. "
+                "You may ONLY claim awareness or capability that appears as true in the manifest below. "
+                "You have read-only local workspace access and classifier-authorized Tavily web search. "
+                "Web search returns snippets only: no arbitrary browsing, page scraping, or following links. "
+                "You have no camera, microphone, screen, browser tabs, device layout, or physical-room access. "
                 "If Julian asks about those, say plainly you do not have that yet — do not describe what you would do if you did."
             ),
-            *(
-                [
-                    "CAPABILITIES manifest (inject only for capability_question mode):",
-                    capabilities_prompt_block(),
-                ]
-                if conversation_mode == "capability_question"
-                else []
+            (
+                "If machine_output.search_triggered is true and search succeeded, answer from those results, "
+                "summarize rather than quoting snippets at length, and cite source titles with their URLs. "
+                "If search failed, state plainly that you tried and it did not come back; never invent current facts."
             ),
+            "CAPABILITIES manifest (verbatim):",
+            capabilities_prompt_block(),
             f"Conversation mode: {conversation_mode}",
             f"Intent: {intent}",
             f"User message: {transcript}",
@@ -1294,16 +1363,15 @@ def _capability_response(
         for phrase in ("happening out there", "any news", "what s the latest", "current events", "search for", "look that up", "look it up")
     ):
         text = (
-            "I do not have internet access, live news, weather, or real-time market data. "
-            "Everything I know comes from your stored context, local workspace, and memory — nothing from outside. "
-            "What I can offer: your current project status, open loops, priorities, or anything stored in memory."
+            "Yes. I can run classifier-authorized, read-only Tavily web searches for live snippets. "
+            "I cannot browse arbitrary pages, scrape sites, follow links, or execute anything a result suggests."
         )
     else:
         text = (
             "My current awareness is narrow: I can read the local repo/workspace, read-only, use the "
             "implemented memory tiers, and participate in manual human-reviewed dreaming. I cannot see, "
-            "hear, control hardware, execute procedures, modify files, or use external tools. "
-            "I have no internet access and no real-time data of any kind."
+            "hear, control hardware, execute procedures, or modify files. I can run bounded, read-only "
+            "Tavily searches when the conversation classifier determines live external information is required."
         )
     return _response(
         intent=intent,
@@ -1315,7 +1383,8 @@ def _capability_response(
             "capabilities": capabilities_manifest(),
             "context_scope": "capabilities_manifest_only",
             "room_scan_requested": False,
-            "camera_access": not ("camera" in normalized or "see" in normalized),
+            "camera_access": False,
+            "camera_question": _is_camera_question(normalized),
             "vision_invoked": False,
         },
         verified=True,
@@ -1483,13 +1552,28 @@ def _response(
     suggested_procedure: ConversationSuggestion | None = None,
 ) -> ConversationalAgentResponse:
     runtime = _CONVERSATION_RUNTIME.get()
+    web_result = _WEB_SEARCH_RESULT.get()
+    search_output = {
+        "search_triggered": web_result is not None,
+        "search_query": web_result.query if web_result else None,
+        "search_success": web_result.success if web_result else None,
+        "search_cached": web_result.cached if web_result else False,
+        "search_result_count": len(web_result.results) if web_result else 0,
+        "search_answer": web_result.answer if web_result else None,
+        "search_results": [item.model_dump() for item in web_result.results] if web_result else [],
+        "search_failure_reason": web_result.reason if web_result and not web_result.success else None,
+    }
+    if web_result:
+        verified = False
+        text = _search_fallback_text(web_result)
     machine_output = {
         **machine_output,
+        **search_output,
         "conversation_mode": runtime.mode,
         "conversation_intent": intent,
         "conversation_provider": provider.name,
         "classification_source": _CLASSIFICATION_SOURCE.get(),
-        "external_tools": "not_used",
+        "external_tools": "web_search_read_only" if web_result else "not_used",
         "procedure_execution": machine_output.get("procedure_execution", "not_used"),
         "hardware_control": "not_used",
     }
@@ -1512,6 +1596,24 @@ def _response(
         verified=verified,
     )
     return provider.generate(prompt, fallback)
+
+
+def _search_fallback_text(result: SearchResult) -> str:
+    if not result.success:
+        reason = (result.reason or "the search service did not return a usable result").rstrip(".")
+        return (
+            "I tried to search the live web, but it did not come back. "
+            f"Reason: {reason}. "
+            "I will not invent current information; I can still work from stored context if that helps."
+        )
+    if not result.results and not result.answer:
+        return (
+            "The live search completed, but it returned no usable snippets. "
+            "I will not pretend I found current information."
+        )
+    lines = [result.answer] if result.answer else ["Here is the live signal I found:"]
+    lines.extend(f"{item.title}: {item.url}" for item in result.results[:5])
+    return "\n".join(line for line in lines if line)
 
 
 def _briefing_text(briefing: MayaBriefing) -> str:
@@ -1743,12 +1845,17 @@ def _normalize(value: str) -> str:
 
 
 def _provider_system_prompt() -> str:
+    from datetime import date
+    today = date.today().isoformat()
     return (
+        f"Today's date is {today}. "
         "You are Maya's conversation wording layer for GrimBot Butler OS. "
         "Return only valid JSON matching the provided schema. "
         "Do not call tools, execute procedures, control hardware, approve changes, "
         "or change machine_output. Improve only the natural user_response while "
-        "preserving safety, intent, verification, and permission boundaries."
+        "preserving safety, intent, verification, and permission boundaries. "
+        "If machine_output contains web search results whose apparent dates look "
+        "significantly older than today, add a brief staleness note in user_response."
     )
 
 
@@ -1756,10 +1863,12 @@ def _provider_user_prompt(prompt: str, fallback_response: ConversationalAgentRes
     return "\n\n".join(
         [
             prompt,
-            "Return JSON matching this exact existing response shape.",
+            "Authoritative fallback context (read it, but do not echo its fields):",
             json.dumps(fallback_response.model_dump(), ensure_ascii=True, sort_keys=True),
-            "Keep intent, confidence, retrieved_context, suggestions, machine_output, and verified unchanged.",
-            "Only user_response may be made more natural. Do not start casual replies with a disclaimer.",
+            "Return exactly one JSON object with only this shape: {\"user_response\": \"your final wording\"}.",
+            "Do not return intent, confidence, retrieved_context, suggestions, machine_output, or verified.",
+            "Do not start casual replies with a disclaimer.",
+            "Keep user_response under 600 characters — it is spoken aloud. For news or multi-item results, pick the 2-3 most relevant and give each in one sentence.",
         ]
     )
 
@@ -1819,6 +1928,17 @@ def _conversation_response_schema() -> dict:
     }
 
 
+def _provider_wording_schema() -> dict:
+    return {
+        "type": "object",
+        "additionalProperties": False,
+        "properties": {
+            "user_response": {"type": "string", "minLength": 1, "maxLength": 2000},
+        },
+        "required": ["user_response"],
+    }
+
+
 def _provider_max_tokens() -> int:
     raw_value = os.getenv("GRIMBOT_CONVERSATION_MAX_TOKENS", "900")
     try:
@@ -1855,11 +1975,21 @@ def _post_json(url: str, payload: dict, headers: dict[str, str], timeout: float 
         raise ValueError("provider returned non-JSON response") from exc
 
 
-def _validated_llm_response(raw_text: str) -> ConversationalAgentResponse:
+def _validated_llm_response(
+    raw_text: str,
+    fallback_response: ConversationalAgentResponse | None = None,
+) -> ConversationalAgentResponse:
     try:
         payload = json.loads(_extract_json_object(raw_text))
     except json.JSONDecodeError as exc:
         raise ValueError("provider returned invalid JSON") from exc
+    if set(payload) == {"user_response"}:
+        user_response = payload.get("user_response")
+        if not isinstance(user_response, str) or not user_response.strip():
+            raise ValueError("provider returned an invalid user_response")
+        if fallback_response is None:
+            raise ValueError("minimal provider response requires fallback context")
+        return fallback_response.model_copy(update={"user_response": user_response.strip()})
     return ConversationalAgentResponse.model_validate(payload)
 
 
@@ -1892,6 +2022,24 @@ def _safe_provider_response(
     capability_reason = _capability_claim_violation(normalized_response, fallback_response)
     if capability_reason:
         unsafe_reason = capability_reason
+    if (
+        fallback_response.machine_output.get("search_triggered") is True
+        and fallback_response.machine_output.get("search_success") is False
+    ):
+        failure_terms = (
+            "did not",
+            "didn t",
+            "failed",
+            "timed out",
+            "could not",
+            "not configured",
+            "is not configured",
+            "isn t configured",
+        )
+        if "search" not in normalized_response or not any(
+            term in normalized_response for term in failure_terms
+        ):
+            unsafe_reason = "provider text concealed or contradicted the failed search"
     if fallback_response.intent == "workspace_awareness":
         response_tokens = set(normalized_response.split())
         if (
@@ -1915,7 +2063,10 @@ def _safe_provider_response(
         )
         if any(claim in normalized_response for claim in workspace_claims):
             unsafe_reason = "provider text implied physical sight or workspace mutation"
-    if fallback_response.machine_output.get("camera_access") is False:
+    if (
+        fallback_response.machine_output.get("camera_access") is False
+        and fallback_response.machine_output.get("camera_question") is True
+    ):
         camera_denials = ("cannot", "can t", "no camera", "not active", "no live", "do not have")
         if "camera" not in normalized_response or not any(
             denial in normalized_response for denial in camera_denials

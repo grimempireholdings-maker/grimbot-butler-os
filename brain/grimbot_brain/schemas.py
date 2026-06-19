@@ -14,7 +14,7 @@ AssistantMode = Literal["maya_chief_of_staff", "neutral_robot", "quiet_observer"
 PermissionLevel = Literal["observe", "suggest", "ask_approval", "execute"]
 MayaResponseMode = Literal["default", "cleanup_coaching"]
 VoiceMode = Literal["mock", "local"]
-SkillCategory = Literal["planning", "memory", "briefing", "productivity"]
+SkillCategory = Literal["planning", "memory", "briefing", "productivity", "research"]
 StateSignalName = Literal[
     "attention",
     "urgency",
@@ -212,7 +212,7 @@ class MayaComposedResponse(BaseModel):
     verified: bool
     directives_applied: list[str] = Field(max_length=10)
     machine_output: dict
-    user_response: str = Field(min_length=1, max_length=2000)
+    user_response: str = Field(min_length=1, max_length=4000)
 
 
 class MayaBriefingRequest(BaseModel):

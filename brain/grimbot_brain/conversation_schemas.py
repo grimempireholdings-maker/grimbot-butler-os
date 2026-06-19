@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing import Literal
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 
 ConversationIntent = Literal[
@@ -33,6 +33,24 @@ ConversationMode = Literal[
 ]
 
 
+class ConversationClassification(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    mode: ConversationMode
+    needs_web_search: bool = False
+    search_query: str | None = Field(default=None, max_length=2000)
+
+    @model_validator(mode="after")
+    def validate_search_decision(self) -> "ConversationClassification":
+        query = self.search_query.strip() if self.search_query else None
+        if self.needs_web_search and not query:
+            raise ValueError("search_query is required when needs_web_search is true")
+        if not self.needs_web_search and query:
+            raise ValueError("search_query must be null when needs_web_search is false")
+        self.search_query = query
+        return self
+
+
 class ConversationSuggestion(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -46,7 +64,7 @@ class ConversationalAgentResponse(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     intent: ConversationIntent
-    user_response: str = Field(min_length=1, max_length=2000)
+    user_response: str = Field(min_length=1, max_length=4000)
     confidence: float = Field(ge=0, le=1)
     retrieved_context: list[dict] = Field(default_factory=list, max_length=20)
     suggested_skill: ConversationSuggestion | None = None

@@ -42,6 +42,7 @@ from .procedural_memory.procedure_schemas import (
 from .procedural_memory.procedure_store import ProcedureStore
 from .robot_memory import RobotMemory
 from .room_scan import run_room_scan
+from .web_search import SearchUsage, search_usage
 from .skills import create_default_registry
 from .response_composer import compose_maya_response
 from .workspace.workspace_inspector import WorkspaceInspector
@@ -82,7 +83,7 @@ load_dotenv()
 
 CONSOLE_DIR = Path(__file__).resolve().parent / "console"
 
-app = FastAPI(title="GrimBot Butler OS Brain", version="0.10.5")
+app = FastAPI(title="GrimBot Butler OS Brain", version="0.10.8")
 app.mount("/console/assets", StaticFiles(directory=CONSOLE_DIR), name="console-assets")
 memory = BrainMemory()
 workspace = WorkspaceInspector()
@@ -100,6 +101,11 @@ def console_page() -> FileResponse:
 @app.get("/health")
 def health() -> dict[str, str]:
     return {"status": "ok"}
+
+
+@app.get("/search/usage", response_model=SearchUsage)
+def get_search_usage() -> SearchUsage:
+    return search_usage()
 
 
 @app.post("/cycle", response_model=RobotCommand)
