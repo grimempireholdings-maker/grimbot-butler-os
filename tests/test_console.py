@@ -131,7 +131,7 @@ def test_console_chat_uses_voice_conversation_agent_response() -> None:
     assert script.index("result.agent_response?.user_response") < script.index("result.maya_response?.user_response")
     assert "/console/assets/console.js?v=0.13.2" in html
     assert "/console/assets/console.css?v=0.13.2" in html
-    assert main_module.app.version == "0.13.2"
+    assert main_module.app.version == "0.13.3"
 
 
 def test_console_has_real_push_to_talk_and_browser_tts_with_text_fallback() -> None:

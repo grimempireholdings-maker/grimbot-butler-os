@@ -19,6 +19,7 @@ ConversationIntent = Literal[
 ]
 
 ConversationMode = Literal[
+    "system_time",
     "ambient_companion",
     "morning_ramp",
     "evening_winddown",

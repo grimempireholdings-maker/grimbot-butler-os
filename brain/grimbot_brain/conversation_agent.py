@@ -8,6 +8,7 @@ import urllib.request
 from collections import deque
 from contextvars import ContextVar
 from dataclasses import dataclass, field
+from datetime import datetime
 from threading import Lock
 from typing import Protocol
 from weakref import WeakKeyDictionary
@@ -443,6 +444,7 @@ def provider_from_env() -> ConversationProvider:
 
 
 _VALID_MODES: frozenset = frozenset({
+    "system_time",
     "ambient_companion", "morning_ramp", "evening_winddown", "casual_presence",
     "approval_review", "gentle_orientation",
     "casual", "morning_orientation", "work_focus", "personal_support",
@@ -483,7 +485,7 @@ def _build_classification_prompt(
     ambient_enabled: bool = True,
 ) -> str:
     mode_list = (
-        "capability_question, feedback_about_maya, morning_ramp, evening_winddown, "
+        "system_time, capability_question, feedback_about_maya, morning_ramp, evening_winddown, "
         "approval_review, gentle_orientation, casual_presence, ambient_companion, "
         "work_focus, personal_support, business_strategy, project_context, workspace_awareness, "
         "physical_environment, casual, morning_orientation, unclear"
@@ -497,6 +499,7 @@ def _build_classification_prompt(
         f"Valid modes: {mode_list}",
         "",
         "Key rules:",
+        "- system_time: asks only for the current server date, time, or both. It never needs web search.",
         "- Choose the narrowest matching mode. Do not use ambient_companion as a generic catch-all.",
         "- First check direct capability/access questions, then paired-history feedback, then time-of-day and social modes.",
         f"- Ambient companion behavior is {'enabled' if ambient_enabled else 'disabled'} for this request.",
@@ -518,6 +521,7 @@ def _build_classification_prompt(
         "",
         "Examples:",
         '- "can you check the camera?" -> {"mode":"capability_question","needs_web_search":false,"search_query":null}',
+        '- "what time is it?" -> {"mode":"system_time","needs_web_search":false,"search_query":null}',
         '- After Maya repeats a morning recommendation, "yeah, you say that every morning lol, there are millions of business models" -> {"mode":"feedback_about_maya","needs_web_search":false,"search_query":null}',
         '- "what is happening out there, any news?" -> {"mode":"capability_question","needs_web_search":true,"search_query":"latest major news"}',
         '- "what is the weather looking like today?" -> {"mode":"capability_question","needs_web_search":true,"search_query":"current local weather"}',
@@ -628,18 +632,28 @@ def run_conversation_agent(
     effective_provider = provider or provider_from_env()
     with _SESSION_LOCK:
         _recent_turns = tuple(_SESSION_STATES.get(memory, ConversationSessionState()).recent_turns)
-    classification, _classification_source = classify_conversation_decision_with_fallback(
-        transcript,
-        recent_turns=_recent_turns,
-        provider=effective_provider,
-        ambient_enabled=request.ambient_mode,
-    )
+    clock_kind = _system_clock_request_kind(transcript)
+    if clock_kind:
+        classification = ConversationClassification(mode="system_time")
+        _classification_source = "system_clock"
+    else:
+        classification, _classification_source = classify_conversation_decision_with_fallback(
+            transcript,
+            recent_turns=_recent_turns,
+            provider=effective_provider,
+            ambient_enabled=request.ambient_mode,
+        )
     conversation_mode = classification.mode
     web_result: SearchResult | None = None
     search_trigger = "none"
     if visual_observation is None and classification.needs_web_search and classification.search_query:
-        _topic, _days = topic_for_query(classification.search_query)
-        web_result = search_web(classification.search_query, memory=memory, topic=_topic, days=_days)
+        grounded_query = _ground_local_search_query(
+            classification.search_query,
+            transcript,
+            context.primary_location(),
+        )
+        _topic, _days = topic_for_query(grounded_query)
+        web_result = search_web(grounded_query, memory=memory, topic=_topic, days=_days)
         search_trigger = "explicit_user_request"
     elif (
         visual_observation is None
@@ -651,14 +665,15 @@ def run_conversation_agent(
         # Architectural precedent: this cached weather lookup is the first and only
         # autonomous, non-question-triggered tool use. Never broaden it to news or
         # any mode other than morning_ramp without a new explicit product decision.
-        location = os.getenv("GRIMBOT_WEATHER_LOCATION", "Dayton, Ohio").strip() or "Dayton, Ohio"
-        web_result = search_web(
-            f"today's weather forecast for {location}",
-            memory=memory,
-            topic="general",
-            days=1,
-        )
-        search_trigger = "proactive_morning_weather"
+        location = context.primary_location()
+        if location:
+            web_result = search_web(
+                f"today's weather forecast for {location}",
+                memory=memory,
+                topic="general",
+                days=1,
+            )
+            search_trigger = "proactive_morning_weather"
     runtime = _runtime_for(memory, conversation_mode)
     context_retrieval_error = None
     if memory_context is None:
@@ -680,6 +695,7 @@ def run_conversation_agent(
 
     context_result = _empty_context_result(retrieval_query.query)
     if conversation_mode not in {
+        "system_time",
         "capability_question",
         "workspace_awareness",
         "casual",
@@ -720,6 +736,8 @@ def run_conversation_agent(
     try:
         if visual_observation is not None:
             agent_response = _photo_response(transcript, visual_observation, provider)
+        elif conversation_mode == "system_time":
+            agent_response = _system_time_response(transcript, clock_kind or "both")
         elif conversation_mode == "capability_question":
             agent_response = _capability_response(transcript, intent, provider)
         elif conversation_mode == "feedback_about_maya":
@@ -2047,11 +2065,92 @@ def _normalize(value: str) -> str:
     return re.sub(r"[^a-z0-9]+", " ", value.lower()).strip()
 
 
+def _system_clock_request_kind(transcript: str) -> str | None:
+    """Recognize a bare server-clock request without swallowing current-events questions."""
+    normalized = _normalize(transcript)
+    if any(term in normalized for term in ("weather", "news", "happened", "event", "forecast", "headline")):
+        return None
+    patterns = {
+        "time": (
+            r"what(?: s| is) (?:the )?(?:current )?time(?: right now| now)?",
+            r"what time is it(?: right now| now)?",
+            r"tell me (?:the )?(?:current )?time",
+        ),
+        "date": (
+            r"what(?: s| is) (?:today s|the current) date",
+            r"what date is it(?: today)?",
+            r"tell me (?:today s|the current) date",
+        ),
+        "both": (
+            r"what(?: s| is) (?:the )?current date and time",
+            r"(?:can you see or )?are you aware of (?:the )?current date and time",
+            r"tell me (?:the )?current date and time",
+        ),
+    }
+    for kind, candidates in patterns.items():
+        if any(re.fullmatch(pattern, normalized) for pattern in candidates):
+            return kind
+    return None
+
+
+def _ground_local_search_query(query: str, transcript: str, location: str | None) -> str:
+    """Attach verified profile location to implicit local weather/news queries."""
+    if not location:
+        return query
+    lower_query = query.lower()
+    if location.lower() in lower_query:
+        return query
+    combined = f"{query} {transcript}".lower()
+    topic, days = topic_for_query(combined)
+    has_other_location = bool(re.search(r"\bin\s+(?!my\b|the\b)[a-z][a-z .,-]{2,}", lower_query)) or bool(
+        re.search(r"\bfor\s+[A-Z][A-Za-z .,-]{2,}", query)
+    )
+    implicit_weather = days == 1 and not has_other_location
+    implicit_local_news = topic == "news" and any(
+        phrase in combined for phrase in ("local news", "near me", "my area", "around here", "locally")
+    )
+    return f"{query} for {location}" if implicit_weather or implicit_local_news else query
+
+
+def _current_local_datetime() -> datetime:
+    return datetime.now().astimezone()
+
+
+def _system_time_response(transcript: str, kind: str) -> ConversationalAgentResponse:
+    now = _current_local_datetime()
+    zone = now.tzname() or str(now.tzinfo or "local time")
+    date_text = now.strftime("%A, %B %d, %Y").replace(" 0", " ")
+    time_text = f"{now.strftime('%I').lstrip('0') or '0'}:{now.strftime('%M:%S %p')} {zone}"
+    if kind == "time":
+        text = f"It is {time_text}."
+    elif kind == "date":
+        text = f"Today is {date_text}."
+    else:
+        text = f"It is {date_text} at {time_text}."
+    response = _response(
+        intent="casual_chat",
+        transcript=transcript,
+        text=text,
+        confidence=1.0,
+        retrieved_context=[{"type": "system_clock", "value": now.isoformat(timespec="seconds")}],
+        machine_output={
+            "system_time": now.isoformat(timespec="seconds"),
+            "system_timezone": zone,
+            "clock_source": "server_system_clock",
+            "clock_request_kind": kind,
+        },
+        verified=True,
+        provider=MockConversationProvider(),
+    )
+    return response.model_copy(update={
+        "machine_output": {**response.machine_output, "conversation_provider": "system_clock"}
+    })
+
+
 def _provider_system_prompt() -> str:
-    from datetime import date
-    today = date.today().isoformat()
+    now = _current_local_datetime()
     return (
-        f"Today's date is {today}. "
+        f"The authoritative server date and time is {now.isoformat(timespec='seconds')}. "
         "You are Maya's conversation wording layer for GrimBot Butler OS. "
         "Return only valid JSON matching the provided schema. "
         "Do not call tools, execute procedures, control hardware, approve changes, "

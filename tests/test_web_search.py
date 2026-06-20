@@ -232,6 +232,32 @@ def test_live_news_request_uses_results_instead_of_capability_decline(tmp_path, 
     assert "do not have internet access" not in result.user_response.lower()
 
 
+def test_implicit_local_weather_query_is_grounded_in_verified_profile_location(tmp_path, monkeypatch) -> None:
+    captured = {}
+    monkeypatch.setattr(
+        conversation_agent,
+        "classify_conversation_decision_with_fallback",
+        lambda *args, **kwargs: (
+            _decision("capability_question", search=True, query="current local weather"),
+            "llm",
+        ),
+    )
+
+    def fake_search(query, **kwargs):
+        captured["query"] = query
+        return SearchResult(query=query, success=True, answer="Clear skies.")
+
+    monkeypatch.setattr(conversation_agent, "search_web", fake_search)
+    result = run_conversation_agent(
+        _request("What's the weather looking like today?"),
+        "What's the weather looking like today?",
+        BrainMemory(tmp_path / "memory.sqlite3"),
+    )
+
+    assert captured["query"] == "current local weather for Lima, Ohio"
+    assert result.machine_output["search_query"] == "current local weather for Lima, Ohio"
+
+
 def test_manifest_reports_bounded_web_search_capability() -> None:
     manifest = capabilities_manifest()
 

@@ -1,6 +1,6 @@
 [project]
 name = "grimbot-brain"
-version = "0.13.2"
+version = "0.13.3"
 description = "GrimBot Butler OS: conversational Maya with user-initiated voice and single-photo vision."
 readme = "README.md"
 requires-python = ">=3.10"

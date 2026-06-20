@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+from datetime import datetime, timedelta, timezone
 
 import grimbot_brain.conversation_agent as conversation_agent
 import pytest
@@ -34,6 +35,69 @@ def test_casual_greeting_does_not_return_room_scan(tmp_path) -> None:
     assert result.agent_response.intent == "casual_chat"
     assert result.machine_output["room_scan_requested"] is False
     assert "scan room" not in result.speech_output.text.lower()
+
+
+@pytest.mark.parametrize(
+    ("question", "kind", "expected"),
+    [
+        ("what time is it", "time", "8:40:17 AM EDT"),
+        ("what's today's date", "date", "Saturday, June 20, 2026"),
+        (
+            "can you see or are you aware of the current date and time?",
+            "both",
+            "Saturday, June 20, 2026 at 8:40:17 AM EDT",
+        ),
+    ],
+)
+def test_system_clock_questions_are_exact_and_never_search(tmp_path, monkeypatch, question, kind, expected) -> None:
+    fixed = datetime(2026, 6, 20, 8, 40, 17, tzinfo=timezone(-timedelta(hours=4), "EDT"))
+    monkeypatch.setattr(conversation_agent, "_current_local_datetime", lambda: fixed)
+    monkeypatch.setattr(
+        conversation_agent,
+        "classify_conversation_decision_with_fallback",
+        lambda *args, **kwargs: (_ for _ in ()).throw(AssertionError("clock route must bypass classifier")),
+    )
+    monkeypatch.setattr(
+        conversation_agent,
+        "search_web",
+        lambda *args, **kwargs: (_ for _ in ()).throw(AssertionError("clock route must not search")),
+    )
+
+    result = _chat(tmp_path, question)
+    text = result.speech_output.text
+
+    assert result.machine_output["conversation_mode"] == "system_time"
+    assert result.machine_output["classification_source"] == "system_clock"
+    assert result.machine_output["clock_request_kind"] == kind
+    assert result.machine_output["search_triggered"] is False
+    assert result.machine_output["clock_source"] == "server_system_clock"
+    assert expected in text
+    assert not any(term in text.lower() for term in ("cached", "snippet", "varying", "approximately"))
+
+
+def test_current_events_today_does_not_use_system_clock_route(tmp_path, monkeypatch) -> None:
+    monkeypatch.setattr(
+        conversation_agent,
+        "classify_conversation_decision_with_fallback",
+        lambda *args, **kwargs: (
+            conversation_agent.ConversationClassification(
+                mode="capability_question",
+                needs_web_search=True,
+                search_query="today major news",
+            ),
+            "llm",
+        ),
+    )
+    monkeypatch.setattr(
+        conversation_agent,
+        "search_web",
+        lambda query, **kwargs: conversation_agent.SearchResult(query=query, success=True, answer="Current news."),
+    )
+
+    result = _chat(tmp_path, "What happened today?")
+
+    assert result.machine_output["conversation_mode"] != "system_time"
+    assert result.machine_output["search_triggered"] is True
 
 
 def test_casual_greeting_sounds_natural_and_non_template(tmp_path) -> None:

@@ -70,6 +70,7 @@ def test_only_morning_ramp_gets_proactive_cached_weather_hook(tmp_path, monkeypa
     _run(tmp_path, "Just hanging out", AmbientTestProvider("casual_presence"))
 
     assert len(calls) == 1
+    assert calls[0][0] == "today's weather forecast for Lima, Ohio"
     assert calls[0][1]["days"] == 1
     assert morning.machine_output["search_trigger_reason"] == "proactive_morning_weather"
     assert morning.machine_output["proactive_search"] is True

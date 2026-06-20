@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import base64
 import os
-from datetime import date
+from datetime import date, datetime
 
 import pytest
 from dotenv import load_dotenv
@@ -44,7 +44,32 @@ def test_live_morning_greeting_does_not_push_named_project(tmp_path) -> None:
     names = [name.lower() for name in response.machine_output.get("active_projects", [])]
 
     assert response.machine_output["conversation_mode"] == "morning_ramp"
+    assert response.machine_output["search_query"] == "today's weather forecast for Lima, Ohio"
     assert not any(name in response.user_response.lower() for name in names)
+
+
+def test_live_system_clock_bypasses_search_and_matches_server_time(tmp_path) -> None:
+    before = datetime.now().astimezone()
+    result = run_voice_conversation(
+        VoiceConversationRequest(
+            push_to_talk=True,
+            mock_transcript="can you see or are you aware of the current date and time?",
+            ambient_mode=True,
+        ),
+        BrainMemory(tmp_path / "clock.sqlite3"),
+    )
+    after = datetime.now().astimezone()
+    response = result.agent_response
+    assert response is not None
+    reported = datetime.fromisoformat(response.machine_output["system_time"])
+
+    assert response.machine_output["classification_source"] == "system_clock"
+    assert response.machine_output["search_triggered"] is False
+    assert response.machine_output["clock_source"] == "server_system_clock"
+    assert before <= reported <= after
+    assert reported.strftime("%B") in response.user_response
+    assert "cached" not in response.user_response.lower()
+    assert "snippet" not in response.user_response.lower()
 
 
 def test_live_paired_feedback_is_not_business_strategy(tmp_path) -> None:

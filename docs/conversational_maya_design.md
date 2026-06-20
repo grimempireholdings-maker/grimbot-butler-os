@@ -1,5 +1,9 @@
 # Conversational Maya Agent Design
 
+## v0.13.3 Internal Clock and Profile Location
+
+The server clock and Julian's verified profile location are internal authoritative context, not web facts. Bare date/time questions short-circuit into `system_time` before classifier execution and return the timezone-aware server value without Tavily or provider rewriting. Implicit local weather/news query construction reads `ContextSummary.primary_location`; the canonical seed is Lima, Ohio. If that verified field is absent, Maya does not guess a city.
+
 ## v0.13.0 Voice and Photo Turns
 
 Voice does not create a second conversation system. A visible, user-clicked Console button feature-detects browser `SpeechRecognition`, captures one final transcript, and sends it through the existing voice/conversation contract. Browser `SpeechSynthesis` is invoked only for replies to those voice-originated turns. Unsupported, denied, or failed recognition returns the UI to an idle state while preserving text input. No audio bytes reach Maya's server or memory.

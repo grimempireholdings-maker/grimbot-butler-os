@@ -1,5 +1,11 @@
 # Architecture
 
+## v0.13.3 Authoritative Place and Time
+
+Chief of Staff identity context now exposes `primary_location` from the verified `person_profile / Primary location` record. Implicit local weather and local-news queries are grounded with that field before Tavily is called. Proactive morning weather reads the same field. There is no IP geolocation, environment-variable city, or hardcoded fallback; absent verified location means no proactive local-weather call.
+
+Bare current date/time questions enter the internal `system_time` mode before LLM classification. Maya answers from `datetime.now().astimezone()` with an ISO machine value, timezone, and `clock_source=server_system_clock`. This path invokes neither Tavily nor a wording provider, so current time cannot acquire web-snippet hedges. Current events, news, weather, and “what happened today” remain classifier-authorized search requests.
+
 ## v0.13.0 User-Initiated Sensory Boundary
 
 This is Maya's first real sensory-input release. The console microphone button creates one visible browser `SpeechRecognition` session after a user gesture. Final text enters the existing conversation route; browser `SpeechSynthesis` reads only voice-originated replies. Runtime feature detection preserves text chat when recognition is absent or denied. There is no wake word, always-listening loop, background recorder, audio upload, or retained audio.
@@ -22,7 +28,7 @@ The existing paired-turn LLM classifier now includes `ambient_companion`, `morni
 
 Architecture is subconscious. Provider prompts require plain language in normal conversation, and a post-generation gate rejects internal/debug labels unless Julian directly asks how Maya works, about her architecture, or what she can see/access. Machine output remains available to Developer Mode, while daily chat hides it.
 
-`morning_ramp` establishes one narrow precedent: when Ambient Mode is enabled and a real provider classifies a morning greeting, the orchestrator may perform one cached weather lookup for `GRIMBOT_WEATHER_LOCATION`. This is the first autonomous, non-question-triggered tool use. It is weather-only, morning-only, read-only, and cache-bounded. News and every other search still require an explicit user request.
+`morning_ramp` establishes one narrow precedent: when Ambient Mode is enabled and a real provider classifies a morning greeting, the orchestrator may perform one cached weather lookup for Julian's verified profile `primary_location`. This is the first autonomous, non-question-triggered tool use. It is weather-only, morning-only, read-only, and cache-bounded. News and every other search still require an explicit user request.
 
 ## v0.10.8 External-Reach Boundary
 

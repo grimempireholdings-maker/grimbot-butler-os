@@ -85,7 +85,7 @@ load_dotenv()
 
 CONSOLE_DIR = Path(__file__).resolve().parent / "console"
 
-app = FastAPI(title="GrimBot Butler OS Brain", version="0.13.2")
+app = FastAPI(title="GrimBot Butler OS Brain", version="0.13.3")
 app.mount("/console/assets", StaticFiles(directory=CONSOLE_DIR), name="console-assets")
 memory = BrainMemory()
 workspace = WorkspaceInspector()

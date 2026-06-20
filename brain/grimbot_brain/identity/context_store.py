@@ -25,6 +25,7 @@ class ContextStore:
     def summary(self) -> ContextSummary:
         return ContextSummary(
             person_profile=self.entries("person_profile"),
+            primary_location=self.primary_location(),
             missions=self.entries("mission"),
             ventures=self.entries("venture"),
             projects=self.projects(),
@@ -34,6 +35,20 @@ class ContextStore:
             next_actions=self.entries("next_action"),
             protocols=self.entries("protocol"),
         )
+
+    def primary_location(self) -> str | None:
+        """Return Julian's verified profile location; never infer or geolocate it."""
+        with self._connect() as connection:
+            row = connection.execute(
+                """
+                SELECT content FROM identity_context
+                WHERE context_type = 'person_profile'
+                  AND normalized_name = 'primary location'
+                  AND verified = 1
+                LIMIT 1
+                """
+            ).fetchone()
+        return str(row["content"]).strip() if row and str(row["content"]).strip() else None
 
     def entries(self, context_type: str, limit: int = 50) -> list[ContextEntry]:
         with self._connect() as connection:

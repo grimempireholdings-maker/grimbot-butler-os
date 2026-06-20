@@ -39,6 +39,8 @@ def test_default_seed_loads_with_source_separation(tmp_path) -> None:
     summary = store.summary()
 
     assert summary.person_profile[0].name == "Julian Shelton"
+    assert summary.primary_location == "Lima, Ohio"
+    assert store.primary_location() == "Lima, Ohio"
     assert any(project.name == "GrimBot Butler OS" for project in summary.projects)
     roles = {entry.name: entry.content for entry in summary.relationships}
     assert "second-mind" in roles["Julian Prime"]

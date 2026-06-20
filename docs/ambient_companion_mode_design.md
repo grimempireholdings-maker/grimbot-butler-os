@@ -16,7 +16,7 @@ All sources are read-only and failure-tolerant. The mode cannot execute procedur
 
 ## Proactive weather precedent
 
-The approved decision is yes to proactive weather, under one narrow gate. `morning_ramp` may issue a cached read-only weather search for the configured `GRIMBOT_WEATHER_LOCATION` even when the greeting did not explicitly ask for weather. This is Maya's first autonomous, non-question-triggered tool use.
+The approved decision is yes to proactive weather, under one narrow gate. `morning_ramp` may issue a cached read-only weather search for the verified `primary_location` in Julian's Chief of Staff profile even when the greeting did not explicitly ask for weather. No environment or IP-based location fallback is permitted. This is Maya's first autonomous, non-question-triggered tool use.
 
 The precedent is intentionally constrained:
 

@@ -69,6 +69,8 @@ Phase 12 adds the Three-Mode Maya Console v0.12.0. Conversation is the default a
 
 Phase 13 adds real, user-initiated sensory input in v0.13.0. Maya Console push-to-talk uses the browser Web Speech API and speaks voice-originated replies with SpeechSynthesis. A mobile capture control submits exactly one selected photo to Gemini 2.5 Flash Lite for a conversational response. Neither capability is ambient: there is no background audio, live camera feed, continuous video, or persistent raw-media library.
 
+v0.13.3 makes local context and system time authoritative. Julian's verified primary location is stored in Chief of Staff profile context as Lima, Ohio and grounds implicit local weather/news queries; no city is inferred from IP or a hardcoded fallback. Bare date/time questions bypass the conversation classifier and web search, returning the timezone-aware server clock directly.
+
 Maya Console is designed for phone and desktop use over a trusted local network or private Tailscale connection. It is not deployed publicly and should not be exposed directly to the public internet.
 
 LLM output is never connected directly to motors. Every movement command must pass through `brain/grimbot_brain/safety.py`.
@@ -82,7 +84,6 @@ Create a free Tavily API key at [tavily.com](https://tavily.com), copy `.env.exa
 
 ```env
 TAVILY_API_KEY=your_key_here
-GRIMBOT_WEATHER_LOCATION=Dayton, Ohio
 ```
 
 Without this key, classifier-authorized searches fail closed and Maya states that live search did not return rather than fabricating current information.

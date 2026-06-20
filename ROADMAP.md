@@ -127,3 +127,9 @@
 ## Later
 
 - [ ] Humanoid Platform
+## v0.13.3 - Authoritative Location and System Clock
+
+- Verified Lima, Ohio profile location grounds local weather/news queries
+- Removed silent Dayton/environment location fallback
+- Bare date/time questions bypass LLM classification and web search
+- Exact timezone-aware server clock response with no provider hedging
