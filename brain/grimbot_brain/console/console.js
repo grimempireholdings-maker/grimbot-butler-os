@@ -16,6 +16,9 @@ const escapeHtml = (value) => String(value ?? "")
 const empty = (message) => `<div class="empty-state">${escapeHtml(message)}</div>`;
 const errorMarkup = (message) => `<div class="empty-state error-state">${escapeHtml(message)}</div>`;
 const formatJson = (value) => JSON.stringify(value, null, 2);
+let latestMachineOutput = null;
+let activeStandardView = "conversation";
+let briefingGenerated = false;
 
 function errorMessage(payload, fallback) {
   if (typeof payload?.detail === "string") return payload.detail;
@@ -78,14 +81,14 @@ async function loadHealth() {
 
 function addChatMessage(kind, text, machineOutput = null) {
   const log = byId("chat-log");
-  if (log.querySelector(".empty-state")) log.innerHTML = "";
-  const developerMode = byId("developer-mode").checked;
-  const machine = machineOutput
-    ? `<details class="machine-debug" ${developerMode ? "" : "hidden"}><summary>Machine output</summary><pre>${escapeHtml(formatJson(machineOutput))}</pre></details>`
-    : "";
+  if (log.querySelector(".welcome-message")) log.innerHTML = "";
+  if (machineOutput) {
+    latestMachineOutput = machineOutput;
+    renderConversationDiagnostics();
+  }
   log.insertAdjacentHTML("beforeend", `<div class="message ${kind}">
     <span class="speaker">${kind === "user" ? "Julian" : "Maya"}</span>
-    <div>${escapeHtml(text)}</div>${machine}
+    <div>${escapeHtml(text)}</div>
   </div>`);
   log.scrollTop = log.scrollHeight;
 }
@@ -121,6 +124,11 @@ async function sendChat(event) {
         || result.machine_output
         || result.maya_response?.machine_output;
       addChatMessage("maya", responseText, machineOutput);
+      const ambientBriefingModes = ["morning_ramp", "gentle_orientation", "approval_review"];
+      if (result.agent_response?.intent === "chief_of_staff_briefing"
+          && !ambientBriefingModes.includes(machineOutput?.conversation_mode)) {
+        await openBriefing(true);
+      }
     });
   } catch (error) {
     addChatMessage("maya", `Request failed: ${error.message}`);
@@ -151,6 +159,7 @@ async function generateBriefing(button) {
       briefingBlock("Next actions", result.next_actions),
       briefingBlock("Next best action", result.next_best_action),
     ].join("");
+    briefingGenerated = true;
   });
 }
 
@@ -286,6 +295,38 @@ async function loadWorkspace() {
     commitsTarget.innerHTML = errorMarkup(error.message);
     warningsTarget.innerHTML = errorMarkup(error.message);
   }
+}
+
+function statusToken(kind, label, value) {
+  return `<span class="status-token ${escapeHtml(kind)}" data-status-source="${escapeHtml(kind)}"><span>${escapeHtml(label)}</span><strong>${escapeHtml(value)}</strong></span>`;
+}
+
+async function loadStatusTokens() {
+  const target = byId("status-tokens");
+  const [contextResult, workspaceResult, usageResult, promotionsResult, proceduresResult] = await Promise.allSettled([
+    api("/context"), api("/workspace"), api("/search/usage"),
+    api("/dream/promotions"), api("/procedures/pending"),
+  ]);
+  const tokens = [];
+  if (contextResult.status === "fulfilled" && Array.isArray(contextResult.value?.priorities)) {
+    tokens.push(statusToken("priorities", "Priorities", contextResult.value.priorities.length));
+  }
+  if (promotionsResult.status === "fulfilled" && proceduresResult.status === "fulfilled"
+      && Array.isArray(promotionsResult.value) && Array.isArray(proceduresResult.value)) {
+    const pendingFacts = promotionsResult.value.filter((item) => item.status === "pending").length;
+    tokens.push(statusToken("approvals", "Pending review", pendingFacts + proceduresResult.value.length));
+  }
+  if (workspaceResult.status === "fulfilled" && Array.isArray(workspaceResult.value?.recent_commits)
+      && workspaceResult.value.recent_commits.length > 0) {
+    const shortHash = String(workspaceResult.value.recent_commits[0]).trim().split(/\s+/)[0];
+    if (shortHash) tokens.push(statusToken("commit", "Commit", shortHash));
+  }
+  if (usageResult.status === "fulfilled" && Number.isFinite(usageResult.value?.count)
+      && Number.isFinite(usageResult.value?.limit)) {
+    tokens.push(statusToken("search", "Search", `${usageResult.value.count}/${usageResult.value.limit}`));
+  }
+  target.innerHTML = tokens.join("");
+  target.hidden = tokens.length === 0;
 }
 
 async function searchWorkspace(event) {
@@ -551,12 +592,9 @@ async function recallMemory(event) {
   }
 }
 
-const DAILY_LOADERS = {
+const DEVELOPER_LOADERS = {
   context: loadContext,
   workspace: loadWorkspace,
-};
-
-const DEVELOPER_LOADERS = {
   state: loadState,
   skills: loadSkills,
   dream: loadDream,
@@ -564,39 +602,43 @@ const DEVELOPER_LOADERS = {
   memory: loadMemory,
 };
 
-const READ_ONLY_LOADERS = { ...DAILY_LOADERS, ...DEVELOPER_LOADERS };
-let developerPanelsLoaded = false;
+const READ_ONLY_LOADERS = { ...DEVELOPER_LOADERS };
 
 async function loadAllReadOnlyPanels() {
-  const loaders = [loadHealth(), ...Object.values(DAILY_LOADERS).map((loader) => loader())];
+  await Promise.allSettled(Object.values(DEVELOPER_LOADERS).map((loader) => loader()));
+}
+
+function renderConversationDiagnostics() {
+  const target = byId("conversation-diagnostics");
+  if (!target) return;
+  if (latestMachineOutput) renderJson(target, latestMachineOutput);
+}
+
+function showStandardView(view) {
+  activeStandardView = view;
+  byId("developer-view").hidden = true;
+  byId("conversation-view").hidden = view !== "conversation";
+  byId("briefing-view").hidden = view !== "briefing";
+  document.querySelectorAll("[data-view]").forEach((control) => {
+    const active = control.dataset.view === view;
+    control.classList.toggle("active", active);
+    if (control.matches("button")) control.setAttribute("aria-current", active ? "page" : "false");
+  });
+}
+
+async function openBriefing(generate = false) {
   if (byId("developer-mode").checked) {
-    loaders.push(...Object.values(DEVELOPER_LOADERS).map((loader) => loader()));
-    developerPanelsLoaded = true;
+    byId("developer-mode").checked = false;
+    unmountDeveloperView();
   }
-  await Promise.allSettled(loaders);
+  showStandardView("briefing");
+  if (generate && !briefingGenerated) await generateBriefing(byId("generate-briefing"));
 }
 
-async function toggleDeveloperMode(event) {
-  const enabled = event.currentTarget.checked;
-  document.querySelectorAll(".developer-panel").forEach((panel) => {
-    panel.hidden = !enabled;
-  });
-  document.querySelectorAll(".machine-debug").forEach((details) => {
-    details.hidden = !enabled;
-  });
-  if (enabled && !developerPanelsLoaded) {
-    developerPanelsLoaded = true;
-    await Promise.allSettled(Object.values(DEVELOPER_LOADERS).map((loader) => loader()));
-  }
-}
-
-function bindEvents() {
-  byId("chat-form").addEventListener("submit", sendChat);
-  byId("generate-briefing").addEventListener("click", (event) => generateBriefing(event.currentTarget));
+function bindDeveloperEvents() {
   byId("context-search-form").addEventListener("submit", searchContext);
   byId("context-remember-form").addEventListener("submit", rememberContext);
   byId("workspace-search-form").addEventListener("submit", searchWorkspace);
-  byId("developer-mode").addEventListener("change", toggleDeveloperMode);
   byId("skill-form").addEventListener("submit", runSkill);
   byId("run-dream").addEventListener("click", (event) => runDream(event.currentTarget));
   byId("procedure-match-form").addEventListener("submit", matchProcedure);
@@ -619,5 +661,55 @@ function bindEvents() {
   });
 }
 
-bindEvents();
-loadAllReadOnlyPanels();
+async function mountDeveloperView() {
+  byId("conversation-view").hidden = true;
+  byId("briefing-view").hidden = true;
+  byId("developer-view").hidden = false;
+  document.querySelectorAll("[data-view]").forEach((control) => {
+    control.classList.remove("active");
+    if (control.matches("button")) control.setAttribute("aria-current", "false");
+  });
+  const root = byId("developer-root");
+  root.replaceChildren(byId("developer-template").content.cloneNode(true));
+  bindDeveloperEvents();
+  renderConversationDiagnostics();
+  await loadAllReadOnlyPanels();
+}
+
+function unmountDeveloperView() {
+  byId("developer-root").replaceChildren();
+  byId("developer-view").hidden = true;
+}
+
+async function toggleDeveloperMode(event) {
+  if (event.currentTarget.checked) {
+    await mountDeveloperView();
+  } else {
+    unmountDeveloperView();
+    showStandardView(activeStandardView);
+  }
+}
+
+function bindPersistentEvents() {
+  byId("chat-form").addEventListener("submit", sendChat);
+  byId("generate-briefing").addEventListener("click", (event) => generateBriefing(event.currentTarget));
+  byId("developer-mode").addEventListener("change", toggleDeveloperMode);
+  document.querySelectorAll("[data-view]").forEach((control) => {
+    control.addEventListener("click", async (event) => {
+      event.preventDefault();
+      const view = event.currentTarget.dataset.view;
+      if (view === "briefing") await openBriefing(true);
+      else {
+        if (byId("developer-mode").checked) {
+          byId("developer-mode").checked = false;
+          unmountDeveloperView();
+        }
+        showStandardView("conversation");
+      }
+    });
+  });
+}
+
+bindPersistentEvents();
+showStandardView("conversation");
+Promise.allSettled([loadHealth(), loadStatusTokens()]);

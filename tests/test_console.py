@@ -3,11 +3,32 @@ from __future__ import annotations
 import asyncio
 import sqlite3
 import subprocess
+from html.parser import HTMLParser
 from pathlib import Path
 
 from grimbot_brain import main as main_module
 from grimbot_brain.memory import BrainMemory
 from grimbot_brain.workspace.workspace_inspector import WorkspaceInspector
+
+
+class _TemplateAwareParser(HTMLParser):
+    def __init__(self) -> None:
+        super().__init__()
+        self.template_depth = 0
+        self.live_ids: set[str] = set()
+        self.template_ids: set[str] = set()
+
+    def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
+        if tag == "template":
+            self.template_depth += 1
+        element_id = dict(attrs).get("id")
+        if element_id:
+            target = self.template_ids if self.template_depth else self.live_ids
+            target.add(element_id)
+
+    def handle_endtag(self, tag: str) -> None:
+        if tag == "template":
+            self.template_depth -= 1
 
 
 def _get(path: str) -> tuple[int, dict[str, str], bytes]:
@@ -72,24 +93,19 @@ def _table_counts(db_path: Path) -> dict[str, int]:
         }
 
 
-def test_console_route_returns_html_with_operator_sections() -> None:
+def test_console_route_defaults_to_conversation_with_dense_panels_inert() -> None:
     status, headers, body = _get("/console")
     html = body.decode("utf-8")
 
     assert status == 200
     assert headers["content-type"].startswith("text/html")
-    for section in (
-        "Chat with Maya",
-        "Maya Briefing",
-        "Julian's Operating Context",
-        "Workspace",
-        "Internal State",
-        "Skills",
-        "Dreaming",
-        "Procedural Memory",
-        "Memory",
-    ):
-        assert section in html
+    parser = _TemplateAwareParser()
+    parser.feed(html)
+    assert {"conversation-view", "chat-log", "chat-form", "status-tokens"} <= parser.live_ids
+    assert {"context-title", "workspace-title", "dream-title", "procedure-title", "memory-title"} <= parser.template_ids
+    assert not ({"context-title", "workspace-title", "dream-title", "procedure-title", "memory-title"} & parser.live_ids)
+    assert 'id="conversation-view"' in html
+    assert 'id="briefing-view"' in html and 'id="briefing-view" class="mode-view briefing-view"' in html
 
 
 def test_console_static_assets_load() -> None:
@@ -98,10 +114,10 @@ def test_console_static_assets_load() -> None:
 
     assert css_status == 200
     assert css_headers["content-type"].startswith("text/css")
-    assert b".console-grid" in css_body
+    assert b".conversation-stage" in css_body
     assert js_status == 200
     assert "javascript" in js_headers["content-type"]
-    assert b"loadAllReadOnlyPanels" in js_body
+    assert b"mountDeveloperView" in js_body
 
 
 def test_console_chat_uses_voice_conversation_agent_response() -> None:
@@ -113,9 +129,9 @@ def test_console_chat_uses_voice_conversation_agent_response() -> None:
     assert 'api("/voice/conversation"' in script
     assert "result.agent_response?.user_response" in script
     assert script.index("result.agent_response?.user_response") < script.index("result.maya_response?.user_response")
-    assert "/console/assets/console.js?v=0.11.0" in html
-    assert "/console/assets/console.css?v=0.11.0" in html
-    assert main_module.app.version == "0.11.0"
+    assert "/console/assets/console.js?v=0.12.0" in html
+    assert "/console/assets/console.css?v=0.12.0" in html
+    assert main_module.app.version == "0.12.0"
 
 
 def test_console_route_disables_html_cache() -> None:
@@ -151,22 +167,17 @@ def test_console_context_load_does_not_mutate_database(tmp_path, monkeypatch) ->
 
 def test_console_initial_loaders_are_read_only() -> None:
     script = (main_module.CONSOLE_DIR / "console.js").read_text(encoding="utf-8")
-    initial_load = script.split("async function loadAllReadOnlyPanels()", 1)[1].split(
-        "function bindEvents()", 1
-    )[0]
+    initial_load = script.rsplit("bindPersistentEvents();", 1)[1]
 
     assert 'method: "POST"' not in initial_load
+    assert "generateBriefing" not in initial_load
     assert "runDream" not in initial_load
     assert "reviewDream" not in initial_load
     assert "reviewProcedure" not in initial_load
     assert "runSkill" not in initial_load
     assert "rememberContext" not in initial_load
     assert "searchContext" not in initial_load
-    daily_loaders = script.split("const DAILY_LOADERS = {", 1)[1].split("};", 1)[0]
-    assert "context: loadContext" in daily_loaders
-    assert "workspace: loadWorkspace" in daily_loaders
-    for heavy_loader in ("loadState", "loadSkills", "loadDream", "loadProcedures", "loadMemory"):
-        assert heavy_loader not in daily_loaders
+    assert "Promise.allSettled([loadHealth(), loadStatusTokens()])" in initial_load
 
 
 def test_console_does_not_expose_procedure_execution() -> None:
@@ -179,27 +190,54 @@ def test_console_does_not_expose_procedure_execution() -> None:
     assert "/procedures/run" not in script
 
 
-def test_console_workspace_panel_and_developer_mode_defaults() -> None:
+def test_console_developer_mode_mounts_and_unmounts_dense_panels() -> None:
     html = (main_module.CONSOLE_DIR / "index.html").read_text(encoding="utf-8")
     script = (main_module.CONSOLE_DIR / "console.js").read_text(encoding="utf-8")
 
-    assert 'id="workspace-title"' in html
-    assert 'data-refresh="workspace"' in html
-    assert 'id="workspace-search-form"' in html
     assert 'id="developer-mode"' in html
     assert 'id="ambient-mode" type="checkbox" checked' in html
     assert 'ambient_mode: byId("ambient-mode").checked' in script
-    assert 'class="machine-debug"' in script
-    assert html.count("developer-panel") == 5
-    assert html.count("developer-panel\" aria-labelledby") == 5
-    assert html.count("hidden>") >= 5
-    assert 'const DAILY_LOADERS = {' in script
-    assert "workspace: loadWorkspace" in script
-    assert 'document.querySelectorAll(".developer-panel")' in script
-    for daily_panel in ("chat-title", "briefing-title", "context-title", "workspace-title"):
-        panel_markup = html.split(f'id="{daily_panel}"', 1)[0].rsplit("<section", 1)[1]
-        assert "developer-panel" not in panel_markup
-        assert " hidden" not in panel_markup
+    assert '<template id="developer-template">' in html
+    assert 'content.cloneNode(true)' in script
+    assert 'root.replaceChildren(byId("developer-template").content.cloneNode(true))' in script
+    assert 'byId("developer-root").replaceChildren()' in script
+    assert "mountDeveloperView" in script
+    assert "unmountDeveloperView" in script
+
+
+def test_briefing_only_generates_after_explicit_trigger() -> None:
+    script = (main_module.CONSOLE_DIR / "console.js").read_text(encoding="utf-8")
+    html = (main_module.CONSOLE_DIR / "index.html").read_text(encoding="utf-8")
+
+    assert '<div id="briefing-output" class="briefing-output" aria-live="polite"></div>' in html
+    assert "No briefing generated" not in html
+    assert 'if (view === "briefing") await openBriefing(true)' in script
+    assert 'api("/maya/briefing"' in script
+    assert "generateBriefing" not in script.rsplit("bindPersistentEvents();", 1)[1]
+
+
+def test_status_tokens_require_real_backing_fields() -> None:
+    script = (main_module.CONSOLE_DIR / "console.js").read_text(encoding="utf-8")
+
+    for endpoint in ("/context", "/workspace", "/search/usage", "/dream/promotions", "/procedures/pending"):
+        assert f'api("{endpoint}")' in script
+    assert 'contextResult.status === "fulfilled"' in script
+    assert 'workspaceResult.status === "fulfilled"' in script
+    assert 'usageResult.status === "fulfilled"' in script
+    assert 'promotionsResult.status === "fulfilled"' in script
+    assert 'proceduresResult.status === "fulfilled"' in script
+    assert 'target.hidden = tokens.length === 0' in script
+    assert "statusToken(" not in (main_module.CONSOLE_DIR / "index.html").read_text(encoding="utf-8")
+
+
+def test_console_source_has_no_static_capability_claims() -> None:
+    source = "\n".join(
+        (main_module.CONSOLE_DIR / filename).read_text(encoding="utf-8").lower()
+        for filename in ("index.html", "console.js")
+    )
+
+    for suspicious_claim in ("integrated ", "connected to ", "i have access to"):
+        assert suspicious_claim not in source
 
 
 def test_console_workspace_and_context_initial_gets_do_not_mutate(tmp_path, monkeypatch) -> None:

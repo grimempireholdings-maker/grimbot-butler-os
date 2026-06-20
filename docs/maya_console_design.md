@@ -2,46 +2,51 @@
 
 ## Purpose
 
-Maya Console is a local operator surface for GrimBot Butler OS. It makes the existing brain, Maya, memory, skills, dreaming, and procedural-memory APIs usable from a browser before physical hardware exists.
+Maya Console is a local conversation and operator surface for GrimBot Butler OS. It remains a thin FastAPI-served HTML/CSS/JavaScript client: business logic, permissions, storage, and safety stay in Python. There is no framework, package manager, frontend build, CDN, or public deployment.
 
-It is intentionally a thin client. Business logic, validation, permissions, storage, and safety remain in the existing Python modules.
+The console is intended for desktop and phone use over a trusted LAN or private Tailscale connection. It must not be exposed directly to the public internet.
 
-## Delivery
+## Three-mode architecture
 
-- `GET /console` serves the console HTML.
-- `/console/assets/console.css` serves local styling.
-- `/console/assets/console.js` serves local interaction logic.
-- No frontend framework, build step, CDN, or external service is required.
+Conversation is the default. Everything else is opt-in.
 
-## Panels
+### Conversation
 
-- Conversation uses `POST /voice/conversation` in explicit push-to-talk mock mode.
-- Briefing uses `POST /maya/briefing`.
-- Adaptive state uses `GET /state`.
-- Skills use `GET /skills` and operator-triggered skill runs.
-- Dreaming uses fact and promotion GET endpoints plus manual run and review actions.
-- Procedural memory uses active and pending GET endpoints plus manual review and match actions.
-- Robot memory uses rooms, hazards, mess-zone, and relevant-memory endpoints.
+The initial live DOM contains the minimal header and health indicator, a row of live status tokens, chat history, input, send control, Ambient Mode toggle, and persona selector. No context, workspace, memory, state, skill, dreaming, or procedure-review panel is mounted.
 
-## Loading Policy
+### Briefing
 
-Initial page load and refresh controls call read-only GET endpoints only. Mutation-capable endpoints are bound to explicit operator form submissions or buttons. There are no timers, background jobs, automatic dream cycles, or automatic approval flows.
+Briefing is a discrete view backed by `POST /maya/briefing`. It is populated only after the operator selects Briefing or a non-ambient conversational briefing intent opens it. There is no automatic page-load briefing and no permanent empty briefing card in Conversation.
 
-## Safety Boundaries
+### Developer
 
-The console:
+Dense operator panels live inside an inert `<template>`. Checking Developer clones that template into `developer-root`, binds its controls, and then runs the existing read-only loaders. Unchecking Developer removes all mounted panel nodes with `replaceChildren()`. This is a lifecycle boundary, not CSS concealment.
 
-- does not add or call a procedure execution endpoint
-- does not add motors or hardware control
-- does not add autonomous actions
-- does not add external tools
-- does not bypass skill permission checks
-- does not modify adaptive state on page load
-- does not auto-approve dream facts or procedure proposals
-- does not write outside existing backend-managed application storage
+Developer contains Chief of Staff context, active projects, bottlenecks, next actions, context search/write controls, workspace and commits, adaptive state, skills, dreaming review, procedure review and matching, robot memory, and the latest conversation machine diagnostics. Existing review actions retain their explicit human triggers and backend permission gates.
 
-Machine output is displayed separately from Maya's user-facing text. Procedure matching is labeled and treated as matching only.
+## Real-data status tokens
 
-## Error Handling
+Status tokens are a compact orientation layer, not product copy. Every rendered value must come from a successful real endpoint response:
 
-The shared API helper accepts structured FastAPI error details and converts them to readable UI messages. Each panel handles empty arrays independently so one empty or unavailable subsystem does not crash the console.
+- priority count from `GET /context`
+- pending review count from `GET /dream/promotions` and `GET /procedures/pending`
+- latest commit hash from `GET /workspace`
+- monthly search usage from `GET /search/usage`
+
+Each token checks that its response and required fields are present before rendering. Failed or absent data removes the token entirely. Zero is displayed only when a real endpoint returned a valid zero.
+
+Static capability claims are prohibited in console source. The UI must never claim that Maya is integrated with, connected to, or able to access a system unless that statement is derived from a real API field or capability manifest flag. This prevents capability hallucination at the presentation layer.
+
+## Loading policy
+
+Initial load runs only health and status-token GET requests. Developer GET loaders run only after Developer Mode is enabled. Briefing POST runs only after an explicit briefing trigger. Mutation-capable endpoints remain bound to explicit operator forms and review buttons.
+
+There are no timers, background jobs, automatic dream cycles, automatic approvals, procedure execution, motor controls, permission bypasses, or new external tools.
+
+## Mobile behavior
+
+The Conversation surface is sized against the dynamic viewport, respects safe-area insets, keeps chat scroll independent, and anchors the composer near the bottom. At narrow widths, header labels compress, tokens scroll horizontally, the send control becomes a prominent square action, and Developer grids collapse to one column.
+
+## Error handling
+
+The shared API helper converts structured FastAPI errors into readable messages. Developer panels handle empty arrays independently. Status-token failures are intentionally silent: unavailable data produces no token rather than an empty or fabricated claim.

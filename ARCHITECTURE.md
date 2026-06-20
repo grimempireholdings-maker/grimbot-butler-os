@@ -1,5 +1,11 @@
 # Architecture
 
+## v0.12.0 Console Presentation Boundary
+
+Maya Console remains static HTML, CSS, and JavaScript served by FastAPI. Conversation is the only default operational surface. Briefing is an explicit sibling view, while dense context, workspace, state, skill, dreaming, procedure, memory, and diagnostics panels are stored in an inert HTML template and cloned into the live DOM only while Developer Mode is enabled. Disabling Developer Mode removes those nodes and their event bindings rather than cosmetically hiding them.
+
+The Conversation status row is an evidence boundary. Every token is conditional on a successful real GET response and required fields from context, workspace, pending-review, or search-usage APIs. Missing data omits a token; static capability claims are prohibited. Initial load performs no POST request, procedure execution, approval, hardware action, or autonomous work.
+
 ## v0.11.0 Ambient Companion Boundary
 
 `ambient_companion.py` assembles a read-only orientation snapshot from Chief of Staff context, pending human reviews, recent commits, recent non-spatial memories, current local time, and adaptive signals. Adaptive values are converted into private tone guidance before wording; calendar access remains explicitly false. Context assembly catches source failures and never executes procedures, approves proposals, writes workspace files, activates sensors, or controls hardware.

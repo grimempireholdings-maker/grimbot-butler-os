@@ -1,5 +1,14 @@
 # Roadmap
 
+## v0.12.0 - Three-Mode Maya Console
+
+- [x] Make Conversation the default, minimal console surface.
+- [x] Move Briefing into an explicit on-demand view.
+- [x] Dynamically mount and remove all dense Developer panels.
+- [x] Add real-data-only status tokens with omission on unavailable data.
+- [x] Preserve Ambient Mode, persona selection, diagnostics, reviews, and safety boundaries.
+- [x] Verify the conversation surface at phone width over the existing local FastAPI stack.
+
 ## v0.11.0 - Ambient Companion Mode
 
 - [x] Extend the paired-history LLM classifier with six ambient conversation modes.

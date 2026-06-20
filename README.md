@@ -23,6 +23,7 @@ Create a safe, affordable personal robotic assistant capable of perception, memo
 - [x] Read-Only Workspace Awareness
 - [x] Classifier-Authorized Web Search
 - [x] Ambient Companion Mode
+- [x] Three-Mode Maya Console
 - [ ] External Tool Use
 - [ ] Rover Platform
 - [ ] Object Manipulation
@@ -62,6 +63,10 @@ Phase 10.5 adds capability honesty and conversation modes. A hardcoded capabilit
 Phase 10.8 adds Maya's first bounded external-world capability: classifier-authorized Tavily web search. Search is read-only snippet retrieval with a five-second timeout, one-hour cache, episodic usage logging, structured machine output, and honest failure behavior. It does not browse pages, scrape arbitrary URLs, follow links, or execute result content.
 
 Phase 11 adds Ambient Companion Mode v0.11.0. Six new modes flow through the existing paired-history LLM classifier, daily orientation assembles read-only context behind the scenes, and ordinary wording is protected from internal/debug vocabulary. Ambient Mode is on by default in Maya Console; Developer Mode remains the explicit place for architecture and search diagnostics. A morning greeting may perform one cached weather lookup. This is the only autonomous, non-question-triggered search; proactive news is not enabled.
+
+Phase 12 adds the Three-Mode Maya Console v0.12.0. Conversation is the default and contains only live status tokens, chat, Ambient Mode, persona, and send controls. Briefing is generated only after an explicit request. Developer Mode dynamically mounts the full context, workspace, state, skill, dreaming, procedure, memory, and conversation-diagnostic panels, then removes them from the live DOM when disabled. The console remains a local FastAPI-served static application with no frontend build step.
+
+Maya Console is designed for phone and desktop use over a trusted local network or private Tailscale connection. It is not deployed publicly and should not be exposed directly to the public internet.
 
 LLM output is never connected directly to motors. Every movement command must pass through `brain/grimbot_brain/safety.py`.
 
