@@ -129,9 +129,9 @@ def test_console_chat_uses_voice_conversation_agent_response() -> None:
     assert 'api("/voice/conversation"' in script
     assert "result.agent_response?.user_response" in script
     assert script.index("result.agent_response?.user_response") < script.index("result.maya_response?.user_response")
-    assert "/console/assets/console.js?v=0.13.0" in html
-    assert "/console/assets/console.css?v=0.13.0" in html
-    assert main_module.app.version == "0.13.0"
+    assert "/console/assets/console.js?v=0.13.1" in html
+    assert "/console/assets/console.css?v=0.13.1" in html
+    assert main_module.app.version == "0.13.1"
 
 
 def test_console_has_real_push_to_talk_and_browser_tts_with_text_fallback() -> None:
@@ -144,7 +144,9 @@ def test_console_has_real_push_to_talk_and_browser_tts_with_text_fallback() -> N
     assert 'id="voice-status"' in html
     assert "window.SpeechRecognition || window.webkitSpeechRecognition" in script
     assert 'button.dataset.state = "unsupported"' in script
-    assert "Voice input isn't supported here. Text chat still works." in script
+    assert 'byId("chat-input").focus()' in script
+    assert "Use the keyboard microphone for dictation" in script
+    assert "Chrome blocked the mic on this HTTP address" in script
     assert "SpeechSynthesisUtterance" in script
     assert "window.speechSynthesis.speak" in script
     assert "Listening now. Tap again to stop." in script
@@ -163,12 +165,14 @@ def test_console_photo_capture_is_single_shot_and_user_initiated() -> None:
     html = (main_module.CONSOLE_DIR / "index.html").read_text(encoding="utf-8")
 
     assert 'id="photo-input"' in html
+    assert 'id="photo-button" class="photo-button" type="button"' in html
     assert 'type="file"' in html
     assert 'accept="image/*"' in html
     assert 'capture="environment"' in html
     assert 'api("/vision/photo"' not in script
     assert 'fetch(`/vision/photo?prompt=' in script
     assert 'byId("photo-input").addEventListener("change", handlePhotoCapture)' in script
+    assert 'byId("photo-input").click()' in script
     assert "getUserMedia" not in script
     assert "MediaRecorder" not in script
     assert "No live feed is active" in script

@@ -318,6 +318,9 @@ function setVoiceState(state, message) {
 
 function friendlyRecognitionError(code) {
   if (code === "not-allowed" || code === "service-not-allowed") {
+    if (!window.isSecureContext) {
+      return "Chrome blocked the mic on this HTTP address. Use the keyboard mic, or open Maya over trusted HTTPS.";
+    }
     return "Microphone permission is off. You can enable it or keep typing.";
   }
   if (code === "audio-capture") return "No microphone is available. You can keep typing.";
@@ -329,11 +332,10 @@ function initializeBrowserVoice() {
   const Recognition = window.SpeechRecognition || window.webkitSpeechRecognition;
   if (!Recognition) {
     const button = byId("voice-button");
-    button.disabled = true;
     button.dataset.state = "unsupported";
-    button.setAttribute("aria-label", "Push-to-talk unavailable; use text input");
-    byId("voice-label").textContent = "Text only";
-    byId("voice-status").textContent = "Voice input isn't supported here. Text chat still works.";
+    button.setAttribute("aria-label", "Voice recognition unavailable; open text input");
+    byId("voice-label").textContent = "Type";
+    byId("voice-status").textContent = "Chrome voice recognition isn't available on this page. Tap Type, then use the keyboard mic or text.";
     return;
   }
 
@@ -369,7 +371,11 @@ function initializeBrowserVoice() {
 }
 
 function togglePushToTalk() {
-  if (!recognition) return;
+  if (!recognition) {
+    byId("chat-input").focus();
+    byId("voice-status").textContent = "Use the keyboard microphone for dictation, or type your message.";
+    return;
+  }
   if (byId("voice-button").dataset.state === "listening") {
     setVoiceState("sending", "Finishing your voice message…");
     recognition.stop();
@@ -382,7 +388,10 @@ function togglePushToTalk() {
   try {
     recognition.start();
   } catch {
-    setVoiceState("idle", "Voice couldn't start. You can keep typing.");
+    const guidance = window.isSecureContext
+      ? "Voice couldn't start. Check Chrome's microphone permission, or use the keyboard mic."
+      : "Chrome blocked the mic on this HTTP address. Use the keyboard mic, or open Maya over trusted HTTPS.";
+    setVoiceState("idle", guidance);
   }
 }
 
@@ -444,6 +453,7 @@ async function handlePhotoCapture(event) {
 
 function markPhotoPickerOpen() {
   setPhotoState("selecting", "Camera or photo picker open. No live feed is active.");
+  byId("photo-input").click();
 }
 
 function statusToken(kind, label, value) {

@@ -6,7 +6,7 @@
   <meta name="theme-color" content="#050607">
   <title>Maya Console</title>
   <link rel="icon" href="data:,">
-  <link rel="stylesheet" href="/console/assets/console.css?v=0.13.0">
+  <link rel="stylesheet" href="/console/assets/console.css?v=0.13.1">
 </head>
 <body>
   <header class="topbar">
@@ -50,10 +50,10 @@
               </select>
             </div>
             <div class="message-actions">
-              <input id="photo-input" class="sr-only" type="file" accept="image/*" capture="environment">
-              <label id="photo-button" class="photo-button" for="photo-input" data-state="idle" role="button" aria-label="Take or choose one photo">
+              <input id="photo-input" class="sr-only" type="file" accept="image/*" capture="environment" tabindex="-1">
+              <button id="photo-button" class="photo-button" type="button" data-state="idle" aria-label="Take or choose one photo">
                 <span class="photo-indicator" aria-hidden="true"></span><span id="photo-label">Photo</span>
-              </label>
+              </button>
               <button id="voice-button" class="voice-button" type="button" data-state="idle" aria-pressed="false" aria-label="Start push-to-talk">
                 <span class="voice-indicator" aria-hidden="true"></span><span id="voice-label">Talk</span>
               </button>
@@ -162,6 +162,6 @@
   </template>
 
   <div id="toast" class="toast" role="status" aria-live="polite" hidden></div>
-  <script src="/console/assets/console.js?v=0.13.0" defer></script>
+  <script src="/console/assets/console.js?v=0.13.1" defer></script>
 </body>
 </html>
