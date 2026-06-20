@@ -24,6 +24,7 @@ Create a safe, affordable personal robotic assistant capable of perception, memo
 - [x] Classifier-Authorized Web Search
 - [x] Ambient Companion Mode
 - [x] Three-Mode Maya Console
+- [x] Real Browser Voice and Single-Photo Vision
 - [ ] External Tool Use
 - [ ] Rover Platform
 - [ ] Object Manipulation
@@ -66,12 +67,14 @@ Phase 11 adds Ambient Companion Mode v0.11.0. Six new modes flow through the exi
 
 Phase 12 adds the Three-Mode Maya Console v0.12.0. Conversation is the default and contains only live status tokens, chat, Ambient Mode, persona, and send controls. Briefing is generated only after an explicit request. Developer Mode dynamically mounts the full context, workspace, state, skill, dreaming, procedure, memory, and conversation-diagnostic panels, then removes them from the live DOM when disabled. The console remains a local FastAPI-served static application with no frontend build step.
 
+Phase 13 adds real, user-initiated sensory input in v0.13.0. Maya Console push-to-talk uses the browser Web Speech API and speaks voice-originated replies with SpeechSynthesis. A mobile capture control submits exactly one selected photo to Gemini 2.5 Flash Lite for a conversational response. Neither capability is ambient: there is no background audio, live camera feed, continuous video, or persistent raw-media library.
+
 Maya Console is designed for phone and desktop use over a trusted local network or private Tailscale connection. It is not deployed publicly and should not be exposed directly to the public internet.
 
 LLM output is never connected directly to motors. Every movement command must pass through `brain/grimbot_brain/safety.py`.
 
 By default, local cycle logs are stored at `memory/grimbot_brain.sqlite3`.
-Approved room-scan images are stored under `vision/images` by default. The API does not accept arbitrary file uploads.
+Approved room-scan images are stored under `vision/images` by default. User photo uploads are validated, analyzed from a temporary file, and deleted in all outcomes; episodic memory retains only the description and context.
 
 ## Setup
 
@@ -90,14 +93,14 @@ python -m venv .venv
 pip install -e ".[dev]"
 ```
 
-To enable Gemini perception:
+To enable direct Gemini perception and single-photo analysis:
 
 ```powershell
 pip install -e ".[gemini,dev]"
 copy .env.example .env
 ```
 
-Then set `GEMINI_API_KEY` and `GRIMBOT_MOCK_PERCEPTION=false` in `.env`.
+Then set `GEMINI_API_KEY` and `GRIMBOT_MOCK_PERCEPTION=false` in `.env`. Single-photo analysis can instead reuse an existing `OPENROUTER_API_KEY`; it remains pinned to the real `google/gemini-2.5-flash-lite` model through `OPENROUTER_VISION_MODEL` and never falls back to a mock description.
 
 To enable real webcam capture:
 
@@ -105,7 +108,7 @@ To enable real webcam capture:
 pip install -e ".[vision]"
 ```
 
-Voice I/O works in mock mode by default and does not require microphone hardware.
+The CLI voice path remains mockable. Maya Console uses browser-native push-to-talk and speech synthesis with no cloud voice key.
 
 ## Run Brain Server
 
@@ -133,7 +136,7 @@ Open:
 http://127.0.0.1:8000/console
 ```
 
-The console initially loads daily-use Chief of Staff context and read-only workspace awareness. Adaptive state, skills, dreaming, procedural memory, and robot memory are hidden and unloaded until Developer Mode is enabled. Chat, briefings, skill runs, dream cycles, review decisions, procedure matching, workspace search, and memory recall occur only after an explicit operator action.
+The console initially loads Conversation Mode only. Briefing is explicit, and Chief of Staff context, workspace awareness, adaptive state, skills, dreaming, procedural memory, robot memory, and diagnostics are absent from the live DOM until Developer Mode is enabled. Chat, photo capture, briefings, skill runs, dream cycles, review decisions, procedure matching, workspace search, and memory recall occur only after an explicit operator action.
 
 The console does not add autonomous execution, procedure execution, motors, hardware control, or automatic approval. Conversation may perform only classifier-authorized, read-only Tavily snippet search; skill permissions and all other safety boundaries remain authoritative.
 
@@ -285,13 +288,23 @@ Maya never overrides `safety.py` and never presents unverified information as ve
 
 ## Voice I/O
 
-Voice is push-to-talk only.
+Maya Console voice is push-to-talk only. Tapping the microphone begins one browser `SpeechRecognition` session; tapping again stops it. A final transcript uses the existing `/voice/conversation` endpoint, and only replies originating from that voice action are read with browser `SpeechSynthesis`.
+
+Chrome exposes Web Speech recognition through `SpeechRecognition` or its prefixed form. Safari has supported Web Speech recognition since Safari 14.1, but actual availability, permissions, and whether recognition uses an online service remain browser/OS dependent. The console feature-detects at runtime: unsupported or denied recognition leaves text chat fully usable and shows a friendly status rather than a raw browser error. Test the actual phone/browser combination; private-network microphone access may require a secure Tailscale HTTPS URL rather than plain LAN HTTP.
 
 - No always-listening mode
 - No wake word
 - No autonomous action trigger
 - No motors
 - No external agentic tools
+
+Cloud TTS such as ElevenLabs or OpenAI TTS is a future quality decision, not part of v0.13.0.
+
+## Single-Photo Vision
+
+The Conversation view uses the mobile-native pattern `<input type="file" accept="image/*" capture="environment">`. The user explicitly opens the picker/camera and submits one image to `POST /vision/photo`. The server validates type, size, and signature; writes only a temporary approved file; calls real Gemini; logs the resulting description and conversational context; and deletes the bytes in a `finally` block. There is no `getUserMedia`, live preview, continuous video, background capture, or silent camera activation.
+
+Configure either `GEMINI_API_KEY` for Google AI directly or `OPENROUTER_API_KEY` for the pinned Google Gemini model. Camera permission and picker behavior are controlled by the phone browser. If analysis fails, Maya reports a friendly failure and does not invent a visual description.
 
 Voice endpoint:
 

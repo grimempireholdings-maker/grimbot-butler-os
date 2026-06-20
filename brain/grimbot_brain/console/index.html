@@ -6,7 +6,7 @@
   <meta name="theme-color" content="#050607">
   <title>Maya Console</title>
   <link rel="icon" href="data:,">
-  <link rel="stylesheet" href="/console/assets/console.css?v=0.12.0">
+  <link rel="stylesheet" href="/console/assets/console.css?v=0.13.0">
 </head>
 <body>
   <header class="topbar">
@@ -38,6 +38,8 @@
         <form id="chat-form" class="composer">
           <label class="sr-only" for="chat-input">Message Maya</label>
           <textarea id="chat-input" maxlength="1000" rows="2" placeholder="Talk to Maya..." required></textarea>
+          <div id="voice-status" class="voice-status" role="status" aria-live="polite">Voice ready</div>
+          <div id="photo-status" class="photo-status" role="status" aria-live="polite" hidden></div>
           <div class="composer-bar">
             <div class="conversation-controls">
               <label class="ambient-toggle"><input id="ambient-mode" type="checkbox" checked> Ambient Mode</label>
@@ -47,7 +49,16 @@
                 <option value="quiet_observer">Quiet Observer</option>
               </select>
             </div>
-            <button class="send-button" type="submit"><span>Send</span><span aria-hidden="true">&#8593;</span></button>
+            <div class="message-actions">
+              <input id="photo-input" class="sr-only" type="file" accept="image/*" capture="environment">
+              <label id="photo-button" class="photo-button" for="photo-input" data-state="idle" role="button" aria-label="Take or choose one photo">
+                <span class="photo-indicator" aria-hidden="true"></span><span id="photo-label">Photo</span>
+              </label>
+              <button id="voice-button" class="voice-button" type="button" data-state="idle" aria-pressed="false" aria-label="Start push-to-talk">
+                <span class="voice-indicator" aria-hidden="true"></span><span id="voice-label">Talk</span>
+              </button>
+              <button class="send-button" type="submit"><span>Send</span><span aria-hidden="true">&#8593;</span></button>
+            </div>
           </div>
         </form>
       </div>
@@ -151,6 +162,6 @@
   </template>
 
   <div id="toast" class="toast" role="status" aria-live="polite" hidden></div>
-  <script src="/console/assets/console.js?v=0.12.0" defer></script>
+  <script src="/console/assets/console.js?v=0.13.0" defer></script>
 </body>
 </html>

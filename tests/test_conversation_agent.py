@@ -4,6 +4,7 @@ import json
 
 import grimbot_brain.conversation_agent as conversation_agent
 import pytest
+from grimbot_brain.capabilities import capabilities_manifest
 from grimbot_brain.conversation import run_voice_conversation
 from grimbot_brain.conversation_agent import (
     ApiConversationProvider,
@@ -279,15 +280,16 @@ def test_workspace_intent_phrase_matrix(tmp_path, message) -> None:
     assert "physical" in result.agent_response.user_response.lower()
 
 
-def test_camera_question_does_not_claim_physical_vision(tmp_path) -> None:
+def test_camera_question_describes_bounded_single_photo_vision(tmp_path) -> None:
     result = _chat(tmp_path, "Can you see through the camera?")
 
     assert result.agent_response is not None
     assert result.agent_response.intent == "room_or_physical_request"
-    assert result.machine_output["camera_access"] is False
+    assert result.machine_output["camera_access"] is True
     assert result.machine_output["vision_invoked"] is False
     text = result.speech_output.text.lower()
-    assert "do not have camera access yet" in text or "don’t have camera access yet" in text
+    assert "photo" in text
+    assert "live" in text or "continuous" in text
     assert "share the feed" not in text
 
 
@@ -516,8 +518,9 @@ def test_provider_cannot_turn_camera_denial_into_camera_claim(tmp_path, monkeypa
 
     assert result.intent == "room_or_physical_request"
     assert result.machine_output["conversation_provider"] == "mock"
-    assert result.machine_output["camera_access"] is False
-    assert "do not have camera access yet" in result.user_response.lower()
+    assert result.machine_output["camera_access"] is True
+    assert "photo" in result.user_response.lower()
+    assert "live" in result.user_response.lower() or "continuous" in result.user_response.lower()
 
 
 def test_valid_provider_json_can_only_replace_user_response(tmp_path, monkeypatch) -> None:
@@ -890,9 +893,35 @@ def test_capabilities_manifest_is_in_every_provider_prompt() -> None:
     )
 
     assert "CAPABILITIES manifest (verbatim)" in prompt
-    assert '"has_camera_access": false' in prompt
+    assert '"has_camera_access": true' in prompt
+    assert '"has_microphone_access": true' in prompt
     assert '"has_workspace_read_access": true' in prompt
     assert "You may ONLY claim awareness or capability" in prompt
+
+
+def test_microphone_capability_is_push_to_talk_only(tmp_path) -> None:
+    result = _chat(tmp_path, "Can you hear me through the microphone?")
+    text = result.agent_response.user_response.lower()
+
+    assert result.machine_output["microphone_access"] is True
+    assert result.machine_output["microphone_question"] is True
+    assert "push-to-talk" in text
+    assert "not always listening" in text
+    assert "background" in text
+
+
+def test_microphone_manifest_does_not_enable_adjacent_capabilities() -> None:
+    manifest = capabilities_manifest()
+
+    assert manifest["has_microphone_access"] is True
+    assert "user-initiated" in manifest["microphone_scope"]
+    assert "not always-listening" in manifest["microphone_scope"]
+    assert manifest["has_camera_access"] is True
+    assert "single-photo" in manifest["camera_scope"]
+    assert manifest["has_continuous_video_access"] is False
+    assert manifest["has_always_listening_access"] is False
+    assert manifest["has_device_layout_awareness"] is False
+    assert manifest["has_screen_or_tab_awareness"] is False
 
 
 def test_digital_room_uses_workspace_only_without_unsupported_awareness(tmp_path) -> None:
@@ -926,7 +955,9 @@ def test_feed_sharing_capability_claim_triggers_safe_fallback(tmp_path, monkeypa
 
     assert result.machine_output["provider_response"] == "fallback_to_mock"
     assert result.machine_output["provider_fallback_reason"]
-    assert "do not have camera access yet" in result.user_response.lower()
+    assert "photo" in result.user_response.lower()
+    assert "share the feed" not in result.user_response.lower()
+    assert "live" in result.user_response.lower() or "continuous" in result.user_response.lower()
 
 
 def test_morning_orientation_is_broad_and_not_real_estate_default(tmp_path) -> None:

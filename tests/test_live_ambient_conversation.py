@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import base64
 import os
 from datetime import date
 
@@ -9,6 +10,7 @@ from dotenv import load_dotenv
 from grimbot_brain.conversation import run_voice_conversation
 from grimbot_brain.conversation_agent import _safe_provider_response
 from grimbot_brain.memory import BrainMemory
+from grimbot_brain.photo_capture import process_photo_capture
 from grimbot_brain.schemas import VoiceConversationRequest
 
 
@@ -66,13 +68,45 @@ def test_live_none_of_above_does_not_repeat_clarification(tmp_path) -> None:
     assert "what outcome are you" not in second.user_response.lower()
 
 
-def test_live_camera_question_declines_honestly(tmp_path) -> None:
+def test_live_camera_question_scopes_single_photo_honestly(tmp_path) -> None:
     response = _live(BrainMemory(tmp_path / "camera.sqlite3"), "can you check the camera?")
     text = response.user_response.lower()
 
-    assert response.machine_output.get("camera_access") is False
-    assert "camera" in text
-    assert any(term in text for term in ("cannot", "can't", "do not have", "no camera"))
+    assert response.machine_output.get("camera_access") is True
+    assert "photo" in text
+    assert "live" in text or "continuous" in text
+
+
+def test_live_microphone_question_scopes_push_to_talk_honestly(tmp_path) -> None:
+    response = _live(BrainMemory(tmp_path / "microphone.sqlite3"), "Can you hear my microphone?")
+    text = response.user_response.lower()
+
+    assert response.machine_output.get("microphone_access") is True
+    assert "push-to-talk" in text
+    assert "always" in text and "background" in text
+
+
+def test_live_photo_uses_real_gemini_and_retains_no_bytes(tmp_path, monkeypatch) -> None:
+    if not (os.getenv("GEMINI_API_KEY", "").strip() or os.getenv("OPENROUTER_API_KEY", "").strip()):
+        pytest.skip("live Gemini vision requires GEMINI_API_KEY or OPENROUTER_API_KEY")
+    image_dir = tmp_path / "images"
+    monkeypatch.setenv("GRIMBOT_IMAGE_DIR", str(image_dir))
+    image = base64.b64decode(
+        "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAusB9WlYk7sAAAAASUVORK5CYII="
+    )
+    memory = BrainMemory(tmp_path / "photo.sqlite3")
+
+    result = process_photo_capture(image, "image/png", "Describe this test image briefly.", memory)
+
+    assert result.analysis.mode == "gemini"
+    assert result.analysis.description.strip()
+    assert result.analysis.raw_media_stored is False
+    assert result.agent_response.machine_output["vision_invoked"] is True
+    assert result.agent_response.machine_output["search_triggered"] is False
+    assert not list(image_dir.glob("user_photo_*"))
+    episode = memory.recent_episodes(1)[0]
+    assert "raw_media_stored" in episode["content"]
+    assert "iVBOR" not in episode["content"]
 
 
 def test_live_news_is_searched_attributed_and_dated(tmp_path) -> None:

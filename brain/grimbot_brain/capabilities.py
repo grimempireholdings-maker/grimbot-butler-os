@@ -4,10 +4,16 @@ import json
 from types import MappingProxyType
 
 _CAPABILITY_DATA = {
-    "has_camera_access": False,
+    "has_camera_access": True,
+    "camera_scope": "user-initiated single-photo capture only — not continuous video, not always-watching, no background capture",
+    "has_continuous_video_access": False,
     "has_device_layout_awareness": False,
     "has_screen_or_tab_awareness": False,
-    "has_microphone_access": False,
+    "has_microphone_access": True,
+    "microphone_scope": "user-initiated browser push-to-talk only — not always-listening, no background recording",
+    "has_browser_text_to_speech": True,
+    "browser_text_to_speech_scope": "browser speech synthesis for replies to voice-originated turns only",
+    "has_always_listening_access": False,
     "has_workspace_read_access": True,
     "workspace_read_scope": "local repo/filesystem, read-only",
     "can_modify_workspace_files": False,

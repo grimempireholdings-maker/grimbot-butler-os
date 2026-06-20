@@ -3,7 +3,7 @@ from __future__ import annotations
 from pathlib import Path
 
 from dotenv import load_dotenv
-from fastapi import FastAPI, HTTPException, Query
+from fastapi import FastAPI, HTTPException, Query, Request
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 
@@ -31,6 +31,7 @@ from .identity.context_schemas import (
 from .identity.context_store import ContextStore
 from .maya_core import build_maya_briefing
 from .memory import BrainMemory
+from .photo_capture import process_photo_capture
 from .procedural_memory.procedure_matcher import ProcedureMatcher
 from .procedural_memory.procedure_schemas import (
     PendingProcedure,
@@ -59,6 +60,7 @@ from .schemas import (
     MayaComposeRequest,
     MayaComposedResponse,
     MemoryRecord,
+    PhotoConversationResponse,
     RelevantMemoryRequest,
     RelevantMemoryResult,
     RememberRequest,
@@ -83,7 +85,7 @@ load_dotenv()
 
 CONSOLE_DIR = Path(__file__).resolve().parent / "console"
 
-app = FastAPI(title="GrimBot Butler OS Brain", version="0.12.0")
+app = FastAPI(title="GrimBot Butler OS Brain", version="0.13.0")
 app.mount("/console/assets", StaticFiles(directory=CONSOLE_DIR), name="console-assets")
 memory = BrainMemory()
 workspace = WorkspaceInspector()
@@ -121,6 +123,27 @@ def recent_cycles(limit: int = Query(default=10, ge=1, le=100)) -> list[dict]:
 @app.post("/room-scan", response_model=RoomScanResult)
 def room_scan(request: RoomScanRequest) -> RoomScanResult:
     return run_room_scan(request, memory)
+
+
+@app.post("/vision/photo", response_model=PhotoConversationResponse)
+async def vision_photo(
+    request: Request,
+    prompt: str = Query(default="What do you notice in this photo?", max_length=1000),
+) -> PhotoConversationResponse:
+    content_length = request.headers.get("content-length")
+    if content_length and content_length.isdigit() and int(content_length) > 10 * 1024 * 1024:
+        raise HTTPException(status_code=413, detail="Photo exceeds the 10 MB limit")
+    media_type = request.headers.get("content-type", "")
+    data = await request.body()
+    try:
+        return process_photo_capture(data, media_type, prompt, memory)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except RuntimeError as exc:
+        raise HTTPException(
+            status_code=503,
+            detail="Photo vision is unavailable right now. The image was not retained.",
+        ) from exc
 
 
 @app.get("/room-scans")

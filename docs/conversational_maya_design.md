@@ -1,5 +1,11 @@
 # Conversational Maya Agent Design
 
+## v0.13.0 Voice and Photo Turns
+
+Voice does not create a second conversation system. A visible, user-clicked Console button feature-detects browser `SpeechRecognition`, captures one final transcript, and sends it through the existing voice/conversation contract. Browser `SpeechSynthesis` is invoked only for replies to those voice-originated turns. Unsupported, denied, or failed recognition returns the UI to an idle state while preserving text input. No audio bytes reach Maya's server or memory.
+
+A photo turn is likewise explicit and bounded. The user chooses or captures one image; Gemini produces a grounded description; and that observation is supplied to the existing response layer as structured context. Photo turns skip web retrieval, and provider wording remains subject to the capability honesty gate. Memory records what Maya saw and the user's question, never the raw image. The UI and response contract must say single photo, never imply a live feed, continuous sight, or background camera access.
+
 ## v0.11.0 Presence Layer
 
 The existing paired-history classifier now recognizes six ambient modes: `ambient_companion`, `morning_ramp`, `evening_winddown`, `casual_presence`, `approval_review`, and `gentle_orientation`. They are modes in the same decision object as all other conversation behavior, not a parallel router.
@@ -16,7 +22,7 @@ When search is authorized, the orchestrator calls Tavily before response generat
 
 ## v0.10.5 Capability Manifest and Honesty Layer
 
-Maya's capabilities are an application-owned contract, never an LLM inference. `grimbot_brain.capabilities.CAPABILITIES` records which forms of awareness are active. The current release permits bounded, read-only local repository/workspace inspection and the implemented memory tiers. It explicitly denies camera, microphone, screen/tab, device-layout, robot-body, physical-room sensor, workspace-write, procedure-execution, and external-tool access.
+Maya's capabilities are an application-owned contract, never an LLM inference. `grimbot_brain.capabilities.CAPABILITIES` records which forms of awareness are active. The current release permits bounded read-only workspace inspection, implemented memory tiers, user-initiated browser push-to-talk, and one user-shared photo at a time. It explicitly denies always-listening audio, continuous video, live feeds, background capture, screen/tab awareness, device layout, standing robot-body or physical-room sensors, workspace writes, and procedure execution.
 
 The manifest is serialized verbatim into every provider prompt with a non-negotiable instruction not to claim anything whose flag is false. Prompting is only the first boundary: provider wording passes through a post-generation honesty validator. Unsupported capability language triggers the deterministic safe response, preserving a plain denial instead of hypothetical feed-sharing or plausible-sounding fiction.
 

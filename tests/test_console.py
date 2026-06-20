@@ -129,9 +129,50 @@ def test_console_chat_uses_voice_conversation_agent_response() -> None:
     assert 'api("/voice/conversation"' in script
     assert "result.agent_response?.user_response" in script
     assert script.index("result.agent_response?.user_response") < script.index("result.maya_response?.user_response")
-    assert "/console/assets/console.js?v=0.12.0" in html
-    assert "/console/assets/console.css?v=0.12.0" in html
-    assert main_module.app.version == "0.12.0"
+    assert "/console/assets/console.js?v=0.13.0" in html
+    assert "/console/assets/console.css?v=0.13.0" in html
+    assert main_module.app.version == "0.13.0"
+
+
+def test_console_has_real_push_to_talk_and_browser_tts_with_text_fallback() -> None:
+    script = (main_module.CONSOLE_DIR / "console.js").read_text(encoding="utf-8")
+    html = (main_module.CONSOLE_DIR / "index.html").read_text(encoding="utf-8")
+
+    assert 'id="voice-button"' in html
+    assert 'data-state="idle"' in html
+    assert 'aria-pressed="false"' in html
+    assert 'id="voice-status"' in html
+    assert "window.SpeechRecognition || window.webkitSpeechRecognition" in script
+    assert 'button.dataset.state = "unsupported"' in script
+    assert "Voice input isn't supported here. Text chat still works." in script
+    assert "SpeechSynthesisUtterance" in script
+    assert "window.speechSynthesis.speak" in script
+    assert "Listening now. Tap again to stop." in script
+
+
+def test_push_to_talk_states_are_visually_distinct() -> None:
+    css = (main_module.CONSOLE_DIR / "console.css").read_text(encoding="utf-8")
+
+    for state in ('data-state="listening"', 'data-state="sending"', 'data-state="unsupported"'):
+        assert state in css
+    assert "voice-pulse" in css
+
+
+def test_console_photo_capture_is_single_shot_and_user_initiated() -> None:
+    script = (main_module.CONSOLE_DIR / "console.js").read_text(encoding="utf-8")
+    html = (main_module.CONSOLE_DIR / "index.html").read_text(encoding="utf-8")
+
+    assert 'id="photo-input"' in html
+    assert 'type="file"' in html
+    assert 'accept="image/*"' in html
+    assert 'capture="environment"' in html
+    assert 'api("/vision/photo"' not in script
+    assert 'fetch(`/vision/photo?prompt=' in script
+    assert 'byId("photo-input").addEventListener("change", handlePhotoCapture)' in script
+    assert "getUserMedia" not in script
+    assert "MediaRecorder" not in script
+    assert "No live feed is active" in script
+    assert "The image bytes were not retained" in script
 
 
 def test_console_route_disables_html_cache() -> None:

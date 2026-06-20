@@ -1,5 +1,13 @@
 # Architecture
 
+## v0.13.0 User-Initiated Sensory Boundary
+
+This is Maya's first real sensory-input release. The console microphone button creates one visible browser `SpeechRecognition` session after a user gesture. Final text enters the existing conversation route; browser `SpeechSynthesis` reads only voice-originated replies. Runtime feature detection preserves text chat when recognition is absent or denied. There is no wake word, always-listening loop, background recorder, audio upload, or retained audio.
+
+The photo control is a standard mobile file/camera picker, not a camera stream. `POST /vision/photo` accepts one bounded image body, validates MIME type and magic bytes, writes it beneath the approved image directory, and always deletes it after analysis. `perception.analyze_user_photo` calls Gemini 2.5 Flash Lite directly with `GEMINI_API_KEY`, or through OpenRouter's pinned Google Gemini endpoint when only `OPENROUTER_API_KEY` is configured. It has no mock fallback. Episodic memory stores the description, question, model, and `raw_media_stored=false`, never image bytes.
+
+The capability contract therefore enables only `has_microphone_access` with user-initiated push-to-talk scope and `has_camera_access` with user-initiated single-photo scope. Always-listening, continuous video, live feeds, background capture, device layout, screen/tab awareness, procedure execution, and hardware control remain false. Visual turns cannot authorize unrelated web search.
+
 ## v0.12.0 Console Presentation Boundary
 
 Maya Console remains static HTML, CSS, and JavaScript served by FastAPI. Conversation is the only default operational surface. Briefing is an explicit sibling view, while dense context, workspace, state, skill, dreaming, procedure, memory, and diagnostics panels are stored in an inert HTML template and cloned into the live DOM only while Developer Mode is enabled. Disabling Developer Mode removes those nodes and their event bindings rather than cosmetically hiding them.
@@ -28,7 +36,7 @@ This capability is read-only retrieval. It cannot fetch arbitrary URLs, scrape p
 
 `capabilities.py` is the authoritative, hardcoded contract for Maya's runtime awareness. The manifest is copied verbatim into every conversational provider prompt. Mode classification occurs before retrieval, so capability questions receive only the manifest, workspace questions receive only bounded workspace-inspector data, and casual conversation does not inherit business or robot context.
 
-Provider output remains untrusted wording. After schema validation, the honesty gate rejects unsupported claims about cameras, microphones, screens, browser tabs, devices, layout, physical sight, sensors, or feed sharing and falls back to the deterministic response. This validation is independent of prompt compliance.
+Provider output remains untrusted wording. After schema validation, the honesty gate permits only the manifest's exact push-to-talk and single-photo scopes. It rejects broader claims about always-listening audio, live camera feeds, continuous vision, screens, browser tabs, devices, layout, standing physical sight, or sensors and falls back to the deterministic response. This validation is independent of prompt compliance.
 
 GrimBot Butler OS is organized as a modular robotics platform. The current release focuses on Phase 0: a simulated robot brain that can run locally before any physical hardware is connected.
 
@@ -150,14 +158,14 @@ Maya briefing summarizes priority items, FYI, wins, hazards, and the next best a
 
 ## Current Voice Flow
 
-v0.5 adds conversational voice as a push-to-talk I/O layer. It does not add always-listening behavior, wake words, motors, autonomous actions, or external tools.
+v0.13.0 makes the Console side of the push-to-talk I/O layer real with browser-native speech recognition and synthesis. It does not add always-listening behavior, wake words, motors, autonomous actions, or new external tools.
 
 1. The caller must send `push_to_talk=true`.
-2. Speech-to-text runs in mock mode by default, using an explicit transcript.
+2. Maya Console runs one browser speech-recognition session; unsupported browsers retain text input. CLI/API tests may still use an explicit mock transcript.
 3. Optional audio paths must resolve inside the configured safe audio directory.
 4. The transcript queries robot memory for relevant context.
 5. Maya composes a user-facing response.
-6. Text-to-speech returns mock speech output by default.
+6. Voice-originated Console replies use browser SpeechSynthesis; API speech output remains structured and mockable.
 7. Machine output remains separate from speech text.
 
 Safety remains authoritative. Voice context can inform the conversation, but it cannot execute motion or override `safety.py`.

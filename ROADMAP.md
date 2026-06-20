@@ -1,5 +1,13 @@
 # Roadmap
 
+## v0.13.0 - User-Initiated Voice and Single-Photo Vision
+
+- Real browser push-to-talk with runtime fallback to text
+- Browser speech synthesis for voice-originated replies
+- One user-selected mobile photo analyzed by real Gemini 2.5 Flash Lite
+- Description-only episodic memory with guaranteed temporary-image deletion
+- Precisely scoped microphone/camera capability honesty; no ambient sensing
+
 ## v0.12.0 - Three-Mode Maya Console
 
 - [x] Make Conversation the default, minimal console surface.

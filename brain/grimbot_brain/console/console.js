@@ -19,6 +19,11 @@ const formatJson = (value) => JSON.stringify(value, null, 2);
 let latestMachineOutput = null;
 let activeStandardView = "conversation";
 let briefingGenerated = false;
+let recognition = null;
+let recognitionBaseText = "";
+let recognitionFinalText = "";
+let recognitionFailed = false;
+let voiceResponsePending = false;
 
 function errorMessage(payload, fallback) {
   if (typeof payload?.detail === "string") return payload.detail;
@@ -102,6 +107,8 @@ async function sendChat(event) {
   const input = byId("chat-input");
   const text = input.value.trim();
   if (!text) return;
+  const shouldSpeakReply = voiceResponsePending;
+  voiceResponsePending = false;
   addChatMessage("user", text);
   input.value = "";
   try {
@@ -124,6 +131,7 @@ async function sendChat(event) {
         || result.machine_output
         || result.maya_response?.machine_output;
       addChatMessage("maya", responseText, machineOutput);
+      if (shouldSpeakReply) speakVoiceReply(responseText);
       const ambientBriefingModes = ["morning_ramp", "gentle_orientation", "approval_review"];
       if (result.agent_response?.intent === "chief_of_staff_briefing"
           && !ambientBriefingModes.includes(machineOutput?.conversation_mode)) {
@@ -131,6 +139,7 @@ async function sendChat(event) {
       }
     });
   } catch (error) {
+    if (shouldSpeakReply) setVoiceState("idle", "The voice message couldn't be sent. You can try again or type.");
     addChatMessage("maya", `Request failed: ${error.message}`);
   }
 }
@@ -295,6 +304,146 @@ async function loadWorkspace() {
     commitsTarget.innerHTML = errorMarkup(error.message);
     warningsTarget.innerHTML = errorMarkup(error.message);
   }
+}
+
+function setVoiceState(state, message) {
+  const button = byId("voice-button");
+  const label = byId("voice-label");
+  button.dataset.state = state;
+  button.setAttribute("aria-pressed", state === "listening" ? "true" : "false");
+  button.setAttribute("aria-label", state === "listening" ? "Stop push-to-talk" : "Start push-to-talk");
+  label.textContent = state === "listening" ? "Listening" : state === "sending" ? "Sending" : "Talk";
+  byId("voice-status").textContent = message;
+}
+
+function friendlyRecognitionError(code) {
+  if (code === "not-allowed" || code === "service-not-allowed") {
+    return "Microphone permission is off. You can enable it or keep typing.";
+  }
+  if (code === "audio-capture") return "No microphone is available. You can keep typing.";
+  if (code === "network") return "Voice recognition is unavailable right now. You can keep typing.";
+  return "I didn't catch that. Tap Talk to try again, or type instead.";
+}
+
+function initializeBrowserVoice() {
+  const Recognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+  if (!Recognition) {
+    const button = byId("voice-button");
+    button.disabled = true;
+    button.dataset.state = "unsupported";
+    button.setAttribute("aria-label", "Push-to-talk unavailable; use text input");
+    byId("voice-label").textContent = "Text only";
+    byId("voice-status").textContent = "Voice input isn't supported here. Text chat still works.";
+    return;
+  }
+
+  recognition = new Recognition();
+  recognition.continuous = false;
+  recognition.interimResults = true;
+  recognition.maxAlternatives = 1;
+  recognition.lang = navigator.language || "en-US";
+  recognition.onstart = () => setVoiceState("listening", "Listening now. Tap again to stop.");
+  recognition.onresult = (event) => {
+    let interim = "";
+    for (let index = event.resultIndex; index < event.results.length; index += 1) {
+      const words = event.results[index][0].transcript.trim();
+      if (event.results[index].isFinal) recognitionFinalText = `${recognitionFinalText} ${words}`.trim();
+      else interim = `${interim} ${words}`.trim();
+    }
+    byId("chat-input").value = [recognitionBaseText, recognitionFinalText, interim].filter(Boolean).join(" ");
+  };
+  recognition.onerror = (event) => {
+    recognitionFailed = true;
+    setVoiceState("idle", friendlyRecognitionError(event.error));
+  };
+  recognition.onend = () => {
+    const transcript = recognitionFinalText.trim();
+    if (transcript && !recognitionFailed) {
+      voiceResponsePending = true;
+      setVoiceState("sending", "Sending your voice message…");
+      byId("chat-form").requestSubmit();
+    } else if (!recognitionFailed) {
+      setVoiceState("idle", "Voice ready");
+    }
+  };
+}
+
+function togglePushToTalk() {
+  if (!recognition) return;
+  if (byId("voice-button").dataset.state === "listening") {
+    setVoiceState("sending", "Finishing your voice message…");
+    recognition.stop();
+    return;
+  }
+  if ("speechSynthesis" in window) window.speechSynthesis.cancel();
+  recognitionBaseText = byId("chat-input").value.trim();
+  recognitionFinalText = "";
+  recognitionFailed = false;
+  try {
+    recognition.start();
+  } catch {
+    setVoiceState("idle", "Voice couldn't start. You can keep typing.");
+  }
+}
+
+function speakVoiceReply(text) {
+  if (!("speechSynthesis" in window) || !("SpeechSynthesisUtterance" in window)) return;
+  window.speechSynthesis.cancel();
+  const utterance = new SpeechSynthesisUtterance(text);
+  utterance.lang = navigator.language || "en-US";
+  utterance.rate = 1;
+  utterance.onend = () => setVoiceState("idle", "Voice ready");
+  utterance.onerror = () => setVoiceState("idle", "Reply received. Voice playback isn't available here.");
+  window.speechSynthesis.speak(utterance);
+}
+
+function setPhotoState(state, message = "") {
+  const button = byId("photo-button");
+  const status = byId("photo-status");
+  button.dataset.state = state;
+  byId("photo-label").textContent = state === "analyzing" ? "Looking" : "Photo";
+  status.textContent = message;
+  status.hidden = !message;
+}
+
+async function handlePhotoCapture(event) {
+  const input = event.currentTarget;
+  const file = input.files?.[0];
+  if (!file) {
+    setPhotoState("idle");
+    return;
+  }
+  if (file.size > 10 * 1024 * 1024) {
+    setPhotoState("idle", "That photo is over 10 MB. Choose a smaller image.");
+    input.value = "";
+    return;
+  }
+
+  const promptInput = byId("chat-input");
+  const prompt = promptInput.value.trim() || "What do you notice in this photo?";
+  addChatMessage("user", promptInput.value.trim() ? `Shared a photo: ${promptInput.value.trim()}` : "Shared a photo.");
+  promptInput.value = "";
+  setPhotoState("analyzing", "Analyzing this one photo. No live feed is active.");
+  try {
+    const response = await fetch(`/vision/photo?prompt=${encodeURIComponent(prompt)}`, {
+      method: "POST",
+      headers: { "Content-Type": file.type || "application/octet-stream" },
+      body: file,
+    });
+    const payload = await response.json();
+    if (!response.ok) throw new Error(errorMessage(payload, "Photo analysis failed"));
+    addChatMessage("maya", payload.agent_response.user_response, payload.agent_response.machine_output);
+    setPhotoState("idle", "Photo analyzed. The image bytes were not retained.");
+  } catch {
+    addChatMessage("maya", "I couldn't analyze that photo. It was not retained; you can try another image or keep chatting.");
+    setPhotoState("idle", "Photo analysis unavailable. The image was not retained.");
+  } finally {
+    input.value = "";
+  }
+}
+
+function markPhotoPickerOpen() {
+  setPhotoState("selecting", "Camera or photo picker open. No live feed is active.");
 }
 
 function statusToken(kind, label, value) {
@@ -692,6 +841,16 @@ async function toggleDeveloperMode(event) {
 
 function bindPersistentEvents() {
   byId("chat-form").addEventListener("submit", sendChat);
+  byId("voice-button").addEventListener("click", togglePushToTalk);
+  byId("photo-button").addEventListener("click", markPhotoPickerOpen);
+  byId("photo-input").addEventListener("change", handlePhotoCapture);
+  window.addEventListener("focus", () => {
+    window.setTimeout(() => {
+      if (byId("photo-button").dataset.state === "selecting" && !byId("photo-input").files?.length) {
+        setPhotoState("idle");
+      }
+    }, 400);
+  });
   byId("generate-briefing").addEventListener("click", (event) => generateBriefing(event.currentTarget));
   byId("developer-mode").addEventListener("change", toggleDeveloperMode);
   document.querySelectorAll("[data-view]").forEach((control) => {
@@ -711,5 +870,6 @@ function bindPersistentEvents() {
 }
 
 bindPersistentEvents();
+initializeBrowserVoice();
 showStandardView("conversation");
 Promise.allSettled([loadHealth(), loadStatusTokens()]);

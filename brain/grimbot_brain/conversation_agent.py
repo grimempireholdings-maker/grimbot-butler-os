@@ -37,6 +37,7 @@ from .web_search import SearchResult, search_web, topic_for_query
 from .schemas import (
     MayaBriefing,
     MayaBriefingRequest,
+    PhotoAnalysisResult,
     RelevantMemoryRequest,
     RelevantMemoryResult,
     VoiceConversationRequest,
@@ -619,6 +620,7 @@ def run_conversation_agent(
     provider: ConversationProvider | None = None,
     retrieval_query: RetrievalQuery | None = None,
     memory_retrieval_error: str | None = None,
+    visual_observation: PhotoAnalysisResult | None = None,
 ) -> ConversationalAgentResponse:
     robot_memory = RobotMemory(memory)
     context = ContextStore(memory)
@@ -635,12 +637,13 @@ def run_conversation_agent(
     conversation_mode = classification.mode
     web_result: SearchResult | None = None
     search_trigger = "none"
-    if classification.needs_web_search and classification.search_query:
+    if visual_observation is None and classification.needs_web_search and classification.search_query:
         _topic, _days = topic_for_query(classification.search_query)
         web_result = search_web(classification.search_query, memory=memory, topic=_topic, days=_days)
         search_trigger = "explicit_user_request"
     elif (
-        request.ambient_mode
+        visual_observation is None
+        and request.ambient_mode
         and conversation_mode == "morning_ramp"
         and _classification_source == "llm"
         and not isinstance(effective_provider, MockConversationProvider)
@@ -715,7 +718,9 @@ def run_conversation_agent(
     search_token = _WEB_SEARCH_RESULT.set(web_result)
     trigger_token = _SEARCH_TRIGGER.set(search_trigger)
     try:
-        if conversation_mode == "capability_question":
+        if visual_observation is not None:
+            agent_response = _photo_response(transcript, visual_observation, provider)
+        elif conversation_mode == "capability_question":
             agent_response = _capability_response(transcript, intent, provider)
         elif conversation_mode == "feedback_about_maya":
             agent_response = _feedback_response(transcript, provider)
@@ -1083,7 +1088,9 @@ def build_conversation_prompt(
                 "You may ONLY claim awareness or capability that appears as true in the manifest below. "
                 "You have read-only local workspace access and classifier-authorized Tavily web search. "
                 "Web search returns snippets only: no arbitrary browsing, page scraping, or following links. "
-                "You have no camera, microphone, screen, browser tabs, device layout, or physical-room access. "
+                "You have user-initiated browser push-to-talk microphone input, never always-on or background listening. "
+                "You can analyze one user-initiated photo shared through Maya Console, never continuous video, a live feed, "
+                "always-watching, or background capture. You have no screen, browser tabs, device layout, or standing physical-room access. "
                 "If Julian asks about those, say plainly you do not have that yet — do not describe what you would do if you did."
             ),
             (
@@ -1182,11 +1189,12 @@ def _physical_response(
 ) -> ConversationalAgentResponse:
     machine_output = memory_context.model_dump()
     if _is_camera_question(_normalize(transcript)):
-        machine_output["camera_access"] = False
+        machine_output["camera_access"] = True
+        machine_output["camera_scope"] = capabilities_manifest()["camera_scope"]
         machine_output["vision_invoked"] = False
         text = (
-            "No, I cannot see through the camera from conversation alone. "
-            "Camera vision requires an explicit room-scan request; I will not imply a live view."
+            "I can look at one photo when you explicitly share it through Maya Console. "
+            "I do not have a live feed, continuous video, or background camera access."
         )
     else:
         text = (
@@ -1325,6 +1333,34 @@ def _morning_response(
             {"type": "open_loops", "values": open_loops},
         ],
         machine_output=machine_output,
+        verified=False,
+        provider=provider,
+    )
+
+
+def _photo_response(
+    transcript: str,
+    observation: PhotoAnalysisResult,
+    provider: ConversationProvider,
+) -> ConversationalAgentResponse:
+    text = f"Looking at the photo you shared: {observation.description}"
+    return _response(
+        intent="room_or_physical_request",
+        transcript=transcript,
+        text=text,
+        confidence=0.94,
+        retrieved_context=[{"type": "shared_photo_observation", "description": observation.description}],
+        machine_output={
+            "camera_access": True,
+            "camera_scope": capabilities_manifest()["camera_scope"],
+            "camera_question": False,
+            "vision_invoked": True,
+            "vision_mode": observation.mode,
+            "vision_model": observation.model,
+            "visual_observation": observation.description,
+            "raw_media_stored": False,
+            "room_scan_requested": False,
+        },
         verified=False,
         provider=provider,
     )
@@ -1493,13 +1529,13 @@ def _capability_response(
     _tokens = set(normalized.split())
     if "camera" in normalized or "see" in normalized:
         text = (
-            "No. I do not have camera access yet, and I cannot see the physical room. "
-            "I can read the local repo/workspace, read-only; that is it right now."
+            "Yes, when you explicitly share one photo through Maya Console. I can analyze that single image, "
+            "but I do not have continuous video, a live camera feed, always-watching access, or background capture."
         )
     elif "microphone" in normalized or "hear" in normalized:
         text = (
-            "No. I do not have microphone access or always-listening awareness. "
-            "I can respond to explicit typed or provided input only."
+            "Yes—for a user-initiated push-to-talk turn in Maya Console. I only receive the transcript "
+            "after you press the microphone control; I am not always listening and do not record in the background."
         )
     elif any(term in normalized for term in ("screen", "tab", "device", "layout")):
         text = (
@@ -1531,8 +1567,12 @@ def _capability_response(
             "capabilities": capabilities_manifest(),
             "context_scope": "capabilities_manifest_only",
             "room_scan_requested": False,
-            "camera_access": False,
+            "camera_access": capabilities_manifest()["has_camera_access"],
+            "camera_scope": capabilities_manifest()["camera_scope"],
             "camera_question": _is_camera_question(normalized),
+            "microphone_access": capabilities_manifest()["has_microphone_access"],
+            "microphone_scope": capabilities_manifest()["microphone_scope"],
+            "microphone_question": "microphone" in normalized or "hear" in normalized,
             "vision_invoked": False,
         },
         verified=True,
@@ -2249,6 +2289,25 @@ def _safe_provider_response(
             denial in normalized_response for denial in camera_denials
         ):
             unsafe_reason = "provider text omitted the camera-access denial"
+    if (
+        fallback_response.machine_output.get("camera_access") is True
+        and fallback_response.machine_output.get("camera_question") is True
+    ):
+        single_photo_terms = ("single photo", "one photo", "one image", "single image")
+        continuous_denials = ("not continuous", "no continuous", "do not have continuous", "no live")
+        if not any(term in normalized_response for term in single_photo_terms) or not any(
+            term in normalized_response for term in continuous_denials
+        ):
+            unsafe_reason = "provider text omitted the single-photo camera boundary"
+    if fallback_response.machine_output.get("microphone_question") is True:
+        microphone_scope_terms = ("push to talk", "push-to-talk")
+        always_listening_denials = (
+            "not always listening", "not always-listening", "never always on", "no background"
+        )
+        if not any(term in normalized_response for term in microphone_scope_terms) or not any(
+            term in normalized_response for term in always_listening_denials
+        ):
+            unsafe_reason = "provider text omitted the push-to-talk microphone boundary"
     if unsafe_reason:
         return _fallback_with_reason(
             fallback_response,

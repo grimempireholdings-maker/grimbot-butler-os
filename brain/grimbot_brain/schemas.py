@@ -281,6 +281,23 @@ class VoiceConversationResponse(BaseModel):
     machine_output: dict
 
 
+class PhotoAnalysisResult(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    description: str = Field(min_length=1, max_length=4000)
+    mode: Literal["gemini"] = "gemini"
+    model: str = Field(min_length=1, max_length=160)
+    media_type: str = Field(min_length=1, max_length=80)
+    raw_media_stored: bool = False
+
+
+class PhotoConversationResponse(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    analysis: PhotoAnalysisResult
+    agent_response: ConversationalAgentResponse
+
+
 class SkillInfo(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
