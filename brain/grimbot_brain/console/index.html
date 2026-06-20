@@ -6,7 +6,7 @@
   <meta name="theme-color" content="#050607">
   <title>Maya Console</title>
   <link rel="icon" href="data:,">
-  <link rel="stylesheet" href="/console/assets/console.css?v=0.13.1">
+  <link rel="stylesheet" href="/console/assets/console.css?v=0.13.2">
 </head>
 <body>
   <header class="topbar">
@@ -43,6 +43,7 @@
           <div class="composer-bar">
             <div class="conversation-controls">
               <label class="ambient-toggle"><input id="ambient-mode" type="checkbox" checked> Ambient Mode</label>
+              <label class="speak-toggle"><input id="speak-replies" type="checkbox" checked> Speak replies</label>
               <select id="chat-mode" aria-label="Assistant persona">
                 <option value="maya_chief_of_staff">Maya Chief of Staff</option>
                 <option value="neutral_robot">Neutral Robot</option>
@@ -162,6 +163,6 @@
   </template>
 
   <div id="toast" class="toast" role="status" aria-live="polite" hidden></div>
-  <script src="/console/assets/console.js?v=0.13.1" defer></script>
+  <script src="/console/assets/console.js?v=0.13.2" defer></script>
 </body>
 </html>

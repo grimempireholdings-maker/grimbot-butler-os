@@ -101,16 +101,16 @@ h3 { margin-bottom: 10px; color: var(--muted); font-size: 0.72rem; letter-spacin
 
 .nav-button.active { background: var(--surface-raised); color: var(--text); box-shadow: inset 0 0 0 1px var(--border); }
 
-.header-actions, .health-status, .developer-toggle, .ambient-toggle,
+.header-actions, .health-status, .developer-toggle, .ambient-toggle, .speak-toggle,
 .button-group, .control-row, .composer-bar, .conversation-controls, .form-footer {
   display: flex;
   align-items: center;
 }
 
 .header-actions { justify-self: end; gap: 14px; color: var(--muted); font-size: 0.72rem; }
-.health-status, .developer-toggle, .ambient-toggle { gap: 7px; white-space: nowrap; }
+.health-status, .developer-toggle, .ambient-toggle, .speak-toggle { gap: 7px; white-space: nowrap; }
 .developer-toggle { cursor: pointer; }
-.developer-toggle input, .ambient-toggle input, .check-label input { accent-color: var(--amber); }
+.developer-toggle input, .ambient-toggle input, .speak-toggle input, .check-label input { accent-color: var(--amber); }
 
 .status-dot { width: 7px; height: 7px; border-radius: 50%; background: var(--muted); }
 .status-dot.online { background: var(--good); box-shadow: 0 0 10px rgba(103, 207, 152, 0.65); }
@@ -213,6 +213,9 @@ input:focus, select:focus, textarea:focus { border-color: rgba(94, 203, 215, 0.6
 .conversation-controls select { width: auto; max-width: 190px; min-height: 32px; border-radius: 999px; padding: 4px 26px 4px 10px; color: var(--muted); font-size: 0.7rem; }
 
 .message-actions { display: flex; align-items: center; gap: 7px; }
+.message-heading { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.message-speak { border: 0; background: transparent; color: var(--cyan); cursor: pointer; font-size: 0.9rem; line-height: 1; }
+.message-speak:focus-visible { outline: 1px solid var(--cyan); outline-offset: 3px; }
 .photo-button,
 .voice-button {
   display: inline-flex;
@@ -365,7 +368,10 @@ pre { margin: 0; overflow: auto; white-space: pre-wrap; }
   .brand strong { display: none; }
   .brand-mark { width: 28px; height: 28px; }
   .nav-button { padding-inline: 8px; }
-  .ambient-toggle { font-size: 0.66rem; }
-  .conversation-controls select { max-width: 145px; font-size: 0.64rem; }
+  .ambient-toggle, .speak-toggle { font-size: 0.66rem; }
+  .conversation-controls { display: grid; width: 100%; grid-template-columns: max-content max-content; grid-template-rows: auto auto; }
+  .ambient-toggle { grid-column: 1; grid-row: 1; }
+  .speak-toggle { grid-column: 2; grid-row: 1; }
+  .conversation-controls select { grid-column: 1 / 3; grid-row: 2; width: 100%; max-width: none; font-size: 0.64rem; }
   .status-token { font-size: 0.62rem; }
 }

@@ -129,9 +129,9 @@ def test_console_chat_uses_voice_conversation_agent_response() -> None:
     assert 'api("/voice/conversation"' in script
     assert "result.agent_response?.user_response" in script
     assert script.index("result.agent_response?.user_response") < script.index("result.maya_response?.user_response")
-    assert "/console/assets/console.js?v=0.13.1" in html
-    assert "/console/assets/console.css?v=0.13.1" in html
-    assert main_module.app.version == "0.13.1"
+    assert "/console/assets/console.js?v=0.13.2" in html
+    assert "/console/assets/console.css?v=0.13.2" in html
+    assert main_module.app.version == "0.13.2"
 
 
 def test_console_has_real_push_to_talk_and_browser_tts_with_text_fallback() -> None:
@@ -149,6 +149,10 @@ def test_console_has_real_push_to_talk_and_browser_tts_with_text_fallback() -> N
     assert "Chrome blocked the mic on this HTTP address" in script
     assert "SpeechSynthesisUtterance" in script
     assert "window.speechSynthesis.speak" in script
+    assert 'id="speak-replies" type="checkbox" checked' in html
+    assert 'voiceResponsePending || byId("speak-replies").checked' in script
+    assert 'class="message-speak"' in script
+    assert 'window.localStorage.setItem("mayaSpeakReplies"' in script
     assert "Listening now. Tap again to stop." in script
 
 

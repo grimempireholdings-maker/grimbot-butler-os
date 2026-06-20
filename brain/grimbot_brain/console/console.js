@@ -92,9 +92,14 @@ function addChatMessage(kind, text, machineOutput = null) {
     renderConversationDiagnostics();
   }
   log.insertAdjacentHTML("beforeend", `<div class="message ${kind}">
-    <span class="speaker">${kind === "user" ? "Julian" : "Maya"}</span>
+    <div class="message-heading"><span class="speaker">${kind === "user" ? "Julian" : "Maya"}</span>
+      ${kind === "maya" ? '<button class="message-speak" type="button" aria-label="Hear Maya reply">&#128266;</button>' : ""}
+    </div>
     <div>${escapeHtml(text)}</div>
   </div>`);
+  if (kind === "maya") {
+    log.lastElementChild.querySelector(".message-speak").addEventListener("click", () => speakVoiceReply(text));
+  }
   log.scrollTop = log.scrollHeight;
 }
 
@@ -107,7 +112,7 @@ async function sendChat(event) {
   const input = byId("chat-input");
   const text = input.value.trim();
   if (!text) return;
-  const shouldSpeakReply = voiceResponsePending;
+  const shouldSpeakReply = voiceResponsePending || byId("speak-replies").checked;
   voiceResponsePending = false;
   addChatMessage("user", text);
   input.value = "";
@@ -396,13 +401,18 @@ function togglePushToTalk() {
 }
 
 function speakVoiceReply(text) {
-  if (!("speechSynthesis" in window) || !("SpeechSynthesisUtterance" in window)) return;
+  if (!("speechSynthesis" in window) || !("SpeechSynthesisUtterance" in window)) {
+    byId("voice-status").textContent = "Chrome speech playback isn't available on this device.";
+    return;
+  }
   window.speechSynthesis.cancel();
+  window.speechSynthesis.resume();
   const utterance = new SpeechSynthesisUtterance(text);
   utterance.lang = navigator.language || "en-US";
   utterance.rate = 1;
-  utterance.onend = () => setVoiceState("idle", "Voice ready");
-  utterance.onerror = () => setVoiceState("idle", "Reply received. Voice playback isn't available here.");
+  utterance.onstart = () => { byId("voice-status").textContent = "Maya is speaking…"; };
+  utterance.onend = () => { byId("voice-status").textContent = "Voice reply ready"; };
+  utterance.onerror = () => { byId("voice-status").textContent = "Reply received. Chrome couldn't play the voice; tap the speaker on Maya's message to retry."; };
   window.speechSynthesis.speak(utterance);
 }
 
@@ -442,6 +452,7 @@ async function handlePhotoCapture(event) {
     const payload = await response.json();
     if (!response.ok) throw new Error(errorMessage(payload, "Photo analysis failed"));
     addChatMessage("maya", payload.agent_response.user_response, payload.agent_response.machine_output);
+    if (byId("speak-replies").checked) speakVoiceReply(payload.agent_response.user_response);
     setPhotoState("idle", "Photo analyzed. The image bytes were not retained.");
   } catch {
     addChatMessage("maya", "I couldn't analyze that photo. It was not retained; you can try another image or keep chatting.");
@@ -854,6 +865,17 @@ function bindPersistentEvents() {
   byId("voice-button").addEventListener("click", togglePushToTalk);
   byId("photo-button").addEventListener("click", markPhotoPickerOpen);
   byId("photo-input").addEventListener("change", handlePhotoCapture);
+  try {
+    const savedSpeakReplies = window.localStorage.getItem("mayaSpeakReplies");
+    byId("speak-replies").checked = savedSpeakReplies !== "false";
+  } catch {
+    byId("speak-replies").checked = true;
+  }
+  byId("speak-replies").addEventListener("change", (event) => {
+    try { window.localStorage.setItem("mayaSpeakReplies", String(event.currentTarget.checked)); } catch {}
+    if (event.currentTarget.checked) byId("voice-status").textContent = "Maya will speak her replies.";
+    else window.speechSynthesis?.cancel();
+  });
   window.addEventListener("focus", () => {
     window.setTimeout(() => {
       if (byId("photo-button").dataset.state === "selecting" && !byId("photo-input").files?.length) {
