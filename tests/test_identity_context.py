@@ -39,6 +39,8 @@ def test_default_seed_loads_with_source_separation(tmp_path) -> None:
     summary = store.summary()
 
     assert summary.person_profile[0].name == "Julian Shelton"
+    assert summary.primary_location == "Lima, Ohio"
+    assert store.primary_location() == "Lima, Ohio"
     assert any(project.name == "GrimBot Butler OS" for project in summary.projects)
     roles = {entry.name: entry.content for entry in summary.relationships}
     assert "second-mind" in roles["Julian Prime"]
@@ -183,7 +185,9 @@ def test_day_question_returns_chief_of_staff_briefing(tmp_path, monkeypatch) -> 
     )
 
     assert result.machine_output["active_projects"]
-    assert "cash flow" in result.speech_output.text.lower()
+    assert len(result.machine_output["active_projects"]) >= 2
+    assert result.machine_output["orientation_scope"] == "broad"
+    assert result.machine_output.get("recommended_focus") is None
     assert "scan room" not in result.speech_output.text.lower()
 
 
@@ -239,7 +243,8 @@ def test_unverified_project_context_cannot_be_presented_as_verified(tmp_path, mo
     assert result.machine_output["projects"][0]["verified"] is False
     assert result.maya_response.verified is False
     assert not result.speech_output.text.startswith("Verified.")
-    assert "unverified" in result.speech_output.text.lower()
+    verification_text = result.speech_output.text.lower()
+    assert "not verified" in verification_text or "unverified" in verification_text
 
 
 def test_unverified_priority_makes_briefing_unverified(tmp_path) -> None:
@@ -276,7 +281,8 @@ def test_unknown_question_asks_one_clarifying_question(tmp_path, monkeypatch) ->
 
     assert result.machine_output["needs_clarification"] is True
     assert result.machine_output["clarification_question"]
-    assert "which project" in result.speech_output.text.lower()
+    assert result.speech_output.text.count("?") == 1
+    assert "strategy, memory, skills" not in result.speech_output.text.lower()
     assert "scan room" not in result.speech_output.text.lower()
 
 

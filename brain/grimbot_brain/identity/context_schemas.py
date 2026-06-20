@@ -56,6 +56,7 @@ class ContextSummary(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     person_profile: list[ContextEntry] = Field(default_factory=list)
+    primary_location: str | None = None
     missions: list[ContextEntry] = Field(default_factory=list)
     ventures: list[ContextEntry] = Field(default_factory=list)
     projects: list[ProjectContext] = Field(default_factory=list)

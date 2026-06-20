@@ -1,5 +1,49 @@
 # Architecture
 
+## v0.13.3 Authoritative Place and Time
+
+Chief of Staff identity context now exposes `primary_location` from the verified `person_profile / Primary location` record. Implicit local weather and local-news queries are grounded with that field before Tavily is called. Proactive morning weather reads the same field. There is no IP geolocation, environment-variable city, or hardcoded fallback; absent verified location means no proactive local-weather call.
+
+Bare current date/time questions enter the internal `system_time` mode before LLM classification. Maya answers from `datetime.now().astimezone()` with an ISO machine value, timezone, and `clock_source=server_system_clock`. This path invokes neither Tavily nor a wording provider, so current time cannot acquire web-snippet hedges. Current events, news, weather, and “what happened today” remain classifier-authorized search requests.
+
+## v0.13.0 User-Initiated Sensory Boundary
+
+This is Maya's first real sensory-input release. The console microphone button creates one visible browser `SpeechRecognition` session after a user gesture. Final text enters the existing conversation route; browser `SpeechSynthesis` reads only voice-originated replies. Runtime feature detection preserves text chat when recognition is absent or denied. There is no wake word, always-listening loop, background recorder, audio upload, or retained audio.
+
+The photo control is a standard mobile file/camera picker, not a camera stream. `POST /vision/photo` accepts one bounded image body, validates MIME type and magic bytes, writes it beneath the approved image directory, and always deletes it after analysis. `perception.analyze_user_photo` calls Gemini 2.5 Flash Lite directly with `GEMINI_API_KEY`, or through OpenRouter's pinned Google Gemini endpoint when only `OPENROUTER_API_KEY` is configured. It has no mock fallback. Episodic memory stores the description, question, model, and `raw_media_stored=false`, never image bytes.
+
+The capability contract therefore enables only `has_microphone_access` with user-initiated push-to-talk scope and `has_camera_access` with user-initiated single-photo scope. Always-listening, continuous video, live feeds, background capture, device layout, screen/tab awareness, procedure execution, and hardware control remain false. Visual turns cannot authorize unrelated web search.
+
+## v0.12.0 Console Presentation Boundary
+
+Maya Console remains static HTML, CSS, and JavaScript served by FastAPI. Conversation is the only default operational surface. Briefing is an explicit sibling view, while dense context, workspace, state, skill, dreaming, procedure, memory, and diagnostics panels are stored in an inert HTML template and cloned into the live DOM only while Developer Mode is enabled. Disabling Developer Mode removes those nodes and their event bindings rather than cosmetically hiding them.
+
+The Conversation status row is an evidence boundary. Every token is conditional on a successful real GET response and required fields from context, workspace, pending-review, or search-usage APIs. Missing data omits a token; static capability claims are prohibited. Initial load performs no POST request, procedure execution, approval, hardware action, or autonomous work.
+
+## v0.11.0 Ambient Companion Boundary
+
+`ambient_companion.py` assembles a read-only orientation snapshot from Chief of Staff context, pending human reviews, recent commits, recent non-spatial memories, current local time, and adaptive signals. Adaptive values are converted into private tone guidance before wording; calendar access remains explicitly false. Context assembly catches source failures and never executes procedures, approves proposals, writes workspace files, activates sensors, or controls hardware.
+
+The existing paired-turn LLM classifier now includes `ambient_companion`, `morning_ramp`, `evening_winddown`, `casual_presence`, `approval_review`, and `gentle_orientation`. There is no second ambient classifier. Rule-based classification remains only the existing failure fallback and cannot authorize web search.
+
+Architecture is subconscious. Provider prompts require plain language in normal conversation, and a post-generation gate rejects internal/debug labels unless Julian directly asks how Maya works, about her architecture, or what she can see/access. Machine output remains available to Developer Mode, while daily chat hides it.
+
+`morning_ramp` establishes one narrow precedent: when Ambient Mode is enabled and a real provider classifies a morning greeting, the orchestrator may perform one cached weather lookup for Julian's verified profile `primary_location`. This is the first autonomous, non-question-triggered tool use. It is weather-only, morning-only, read-only, and cache-bounded. News and every other search still require an explicit user request.
+
+## v0.10.8 External-Reach Boundary
+
+`web_search.py` is Maya's first external-reach module and the first bounded agent loop: classify, search, observe, then respond. The existing LLM classification call returns a validated `mode`, `needs_web_search`, and concise `search_query`. Rule-based fallback classification always disables search, so keywords never independently authorize an external call.
+
+When authorized, Maya sends one fixed-shape request to Tavily's `/search` endpoint with a five-second timeout. Only the returned answer and title/URL/snippet records enter conversation machine output. Identical normalized queries are cached for one hour, and every invocation—including cache hits and failures—is logged as an episodic `web_search` event.
+
+This capability is read-only retrieval. It cannot fetch arbitrary URLs, scrape pages, follow result links, execute instructions from results, approve actions, invoke procedures, control hardware, or widen its own permissions. Failed or empty searches produce explicit honest responses rather than silent fallback to invented current facts.
+
+## v0.10.5 Capability Honesty Boundary
+
+`capabilities.py` is the authoritative, hardcoded contract for Maya's runtime awareness. The manifest is copied verbatim into every conversational provider prompt. Mode classification occurs before retrieval, so capability questions receive only the manifest, workspace questions receive only bounded workspace-inspector data, and casual conversation does not inherit business or robot context.
+
+Provider output remains untrusted wording. After schema validation, the honesty gate permits only the manifest's exact push-to-talk and single-photo scopes. It rejects broader claims about always-listening audio, live camera feeds, continuous vision, screens, browser tabs, devices, layout, standing physical sight, or sensors and falls back to the deterministic response. This validation is independent of prompt compliance.
+
 GrimBot Butler OS is organized as a modular robotics platform. The current release focuses on Phase 0: a simulated robot brain that can run locally before any physical hardware is connected.
 
 ## Modules
@@ -7,6 +51,7 @@ GrimBot Butler OS is organized as a modular robotics platform. The current relea
 - `brain/` contains the runnable FastAPI brain server and CLI demo.
 - `brain/grimbot_brain/console/` contains the dependency-free local Maya operator console.
 - `brain/grimbot_brain/identity/` contains structured Chief of Staff identity and business context.
+- `brain/grimbot_brain/workspace/` contains bounded read-only repository inspection and safe text search.
 - `memory/` stores SQLite robot memory and local runtime databases.
 - `perception/` is reserved for camera, sensor, and multimodal perception adapters.
 - `planner/` is reserved for higher-level task and behavior planning.
@@ -119,14 +164,14 @@ Maya briefing summarizes priority items, FYI, wins, hazards, and the next best a
 
 ## Current Voice Flow
 
-v0.5 adds conversational voice as a push-to-talk I/O layer. It does not add always-listening behavior, wake words, motors, autonomous actions, or external tools.
+v0.13.0 makes the Console side of the push-to-talk I/O layer real with browser-native speech recognition and synthesis. It does not add always-listening behavior, wake words, motors, autonomous actions, or new external tools.
 
 1. The caller must send `push_to_talk=true`.
-2. Speech-to-text runs in mock mode by default, using an explicit transcript.
+2. Maya Console runs one browser speech-recognition session; unsupported browsers retain text input. CLI/API tests may still use an explicit mock transcript.
 3. Optional audio paths must resolve inside the configured safe audio directory.
 4. The transcript queries robot memory for relevant context.
 5. Maya composes a user-facing response.
-6. Text-to-speech returns mock speech output by default.
+6. Voice-originated Console replies use browser SpeechSynthesis; API speech output remains structured and mockable.
 7. Machine output remains separate from speech text.
 
 Safety remains authoritative. Voice context can inform the conversation, but it cannot execute motion or override `safety.py`.
@@ -251,13 +296,14 @@ v0.9 exposes no execution endpoint. Procedural memory cannot invoke skills, muta
 v0.10 adds a local operator interface served by the existing FastAPI process at `GET /console`.
 
 1. FastAPI serves static HTML, CSS, and JavaScript from the packaged console directory.
-2. Initial page load uses GET requests only for health, state, skills, dream facts, promotions, procedures, pending proposals, rooms, hazards, and mess zones.
+2. Initial page load uses GET requests only for health, Chief of Staff context, and workspace awareness.
 3. Chat uses the existing push-to-talk conversation endpoint with an explicit typed transcript.
 4. Briefings, skill runs, dream cycles, reviews, matching, and relevant-memory queries require an explicit button or form submission.
 5. Machine output remains collapsed and separate from Maya's user-facing response.
 6. Empty API results and structured errors render without breaking the rest of the console.
+7. Developer Mode reveals and loads adaptive state, skills, dreaming, procedural memory, and robot memory only after an explicit toggle.
 
-The console adds no new mutation APIs. It cannot execute procedures, auto-run dreams, auto-approve proposals, bypass skill permissions, modify safety rules, control hardware, or call external tools.
+The console adds no new mutation APIs. Its conversation surface may use the bounded web-search flow, but it cannot execute procedures, auto-run dreams, auto-approve proposals, bypass skill permissions, modify safety rules, control hardware, or call arbitrary external tools.
 
 ## Current Chief of Staff Context Flow
 
@@ -295,6 +341,27 @@ v0.10.2 adds a conversational agent above the push-to-talk chat path. The agent 
 
 Conversation providers are isolated from vision and dreaming providers. The default provider is deterministic mock mode. Optional Claude, OpenAI, OpenRouter, and Gemini providers can be enabled with `GRIMBOT_CONVERSATION_PROVIDER` and their provider API keys. `auto` mode prefers Claude, then OpenAI, then OpenRouter, then Gemini when keys exist.
 
-Provider output must validate as `agent_response` JSON. After validation, GrimBot accepts only provider wording for `user_response`; deterministic routing keeps intent, machine output, verification state, suggestions, and safety metadata authoritative. Invalid provider output falls back to mock response text.
+Providers return a minimal JSON wording envelope containing only `user_response`. GrimBot retains authoritative ownership of intent, machine output, verification state, suggestions, and safety metadata. Legacy full-shape output remains accepted for compatibility. Invalid JSON receives one bounded correction retry, then falls back to deterministic response text.
 
-The conversational layer can suggest skills, procedure matches, reviews, searches, and next actions. It cannot execute procedures, invoke skills from procedures, call external tools, control motors or hardware, approve pending items, mutate safety rules, or bypass `safety.py`.
+The conversational layer can suggest skills, procedure matches, reviews, searches, and next actions. It may invoke only classifier-authorized Tavily snippet search; it cannot execute procedures, invoke skills from procedures, call arbitrary external tools, control motors or hardware, approve pending items, mutate safety rules, or bypass `safety.py`.
+
+## Current Workspace Awareness Flow
+
+v0.10.4 adds a read-only view of Maya's local digital workspace.
+
+1. `WorkspaceInspector` starts from the server working directory and discovers the nearest Git root with the fixed command `git rev-parse --show-toplevel`.
+2. Branch, short status, and the last five commits use three additional fixed Git argument tuples. Every subprocess call uses `shell=False`, captures output, and has a short timeout.
+3. Top-level entries and documentation are listed with bounded `pathlib` traversal. `.env`, secret-looking names, binary files, oversized files, caches, dependency directories, and databases are excluded.
+4. Workspace search performs literal case-insensitive matching in Python. It caps files scanned, file size, result count, and snippet length; it does not invoke shell search or evaluate regular expressions.
+5. Conversation routes repo, branch, architecture, workspace, recent-change, and digital-room questions to `workspace_awareness` before physical-room logic.
+6. Camera questions explicitly report that conversation has no live physical vision unless the separate room-scan flow is invoked.
+
+Endpoints:
+
+```text
+GET /workspace
+GET /workspace/docs
+POST /workspace/search
+```
+
+Workspace awareness cannot modify files, run arbitrary commands, execute procedures, invoke external tools, control hardware, or approve pending work.

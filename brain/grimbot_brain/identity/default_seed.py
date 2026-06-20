@@ -2,6 +2,7 @@ from __future__ import annotations
 
 CONTEXT_SEED = [
     ("person_profile", "Julian Shelton", "Founder, author, investor, and systems architect building public proof through real estate, AI systems, books, and operating tools.", 100),
+    ("person_profile", "Primary location", "Lima, Ohio", 100),
     ("mission", "Primary mission", "Build durable assets, cash flow, leverage, and freedom under Grim Empire Holdings LLC while documenting the climb in real time.", 100),
     ("mission", "Long-term embodied assistant", "Develop Maya and GrimBot toward a safe, affordable robot butler and eventual synth platform.", 70),
     ("venture", "Grim Empire Holdings LLC", "The holding-company and operating-philosophy layer connecting Julian's ventures, projects, books, systems, and long-term wealth architecture.", 95),

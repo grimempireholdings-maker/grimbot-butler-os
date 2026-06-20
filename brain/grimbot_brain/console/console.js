@@ -16,6 +16,14 @@ const escapeHtml = (value) => String(value ?? "")
 const empty = (message) => `<div class="empty-state">${escapeHtml(message)}</div>`;
 const errorMarkup = (message) => `<div class="empty-state error-state">${escapeHtml(message)}</div>`;
 const formatJson = (value) => JSON.stringify(value, null, 2);
+let latestMachineOutput = null;
+let activeStandardView = "conversation";
+let briefingGenerated = false;
+let recognition = null;
+let recognitionBaseText = "";
+let recognitionFinalText = "";
+let recognitionFailed = false;
+let voiceResponsePending = false;
 
 function errorMessage(payload, fallback) {
   if (typeof payload?.detail === "string") return payload.detail;
@@ -78,14 +86,20 @@ async function loadHealth() {
 
 function addChatMessage(kind, text, machineOutput = null) {
   const log = byId("chat-log");
-  if (log.querySelector(".empty-state")) log.innerHTML = "";
-  const machine = machineOutput
-    ? `<details><summary>Machine output</summary><pre>${escapeHtml(formatJson(machineOutput))}</pre></details>`
-    : "";
+  if (log.querySelector(".welcome-message")) log.innerHTML = "";
+  if (machineOutput) {
+    latestMachineOutput = machineOutput;
+    renderConversationDiagnostics();
+  }
   log.insertAdjacentHTML("beforeend", `<div class="message ${kind}">
-    <span class="speaker">${kind === "user" ? "Julian" : "Maya"}</span>
-    <div>${escapeHtml(text)}</div>${machine}
+    <div class="message-heading"><span class="speaker">${kind === "user" ? "Julian" : "Maya"}</span>
+      ${kind === "maya" ? '<button class="message-speak" type="button" aria-label="Hear Maya reply">&#128266;</button>' : ""}
+    </div>
+    <div>${escapeHtml(text)}</div>
   </div>`);
+  if (kind === "maya") {
+    log.lastElementChild.querySelector(".message-speak").addEventListener("click", () => speakVoiceReply(text));
+  }
   log.scrollTop = log.scrollHeight;
 }
 
@@ -98,6 +112,8 @@ async function sendChat(event) {
   const input = byId("chat-input");
   const text = input.value.trim();
   if (!text) return;
+  const shouldSpeakReply = voiceResponsePending || byId("speak-replies").checked;
+  voiceResponsePending = false;
   addChatMessage("user", text);
   input.value = "";
   try {
@@ -108,6 +124,7 @@ async function sendChat(event) {
           push_to_talk: true,
           mock_transcript: text,
           assistant_mode: byId("chat-mode").value,
+          ambient_mode: byId("ambient-mode").checked,
           verified: false,
         },
       });
@@ -119,8 +136,15 @@ async function sendChat(event) {
         || result.machine_output
         || result.maya_response?.machine_output;
       addChatMessage("maya", responseText, machineOutput);
+      if (shouldSpeakReply) speakVoiceReply(responseText);
+      const ambientBriefingModes = ["morning_ramp", "gentle_orientation", "approval_review"];
+      if (result.agent_response?.intent === "chief_of_staff_briefing"
+          && !ambientBriefingModes.includes(machineOutput?.conversation_mode)) {
+        await openBriefing(true);
+      }
     });
   } catch (error) {
+    if (shouldSpeakReply) setVoiceState("idle", "The voice message couldn't be sent. You can try again or type.");
     addChatMessage("maya", `Request failed: ${error.message}`);
   }
 }
@@ -149,6 +173,7 @@ async function generateBriefing(button) {
       briefingBlock("Next actions", result.next_actions),
       briefingBlock("Next best action", result.next_best_action),
     ].join("");
+    briefingGenerated = true;
   });
 }
 
@@ -254,6 +279,246 @@ async function rememberContext(event) {
     });
   } catch (error) {
     showToast(error.message, true);
+  }
+}
+
+function workspaceFact(label, value) {
+  return `<div class="workspace-fact"><span>${escapeHtml(label)}</span><strong>${escapeHtml(value || "Unavailable")}</strong></div>`;
+}
+
+async function loadWorkspace() {
+  const summaryTarget = byId("workspace-summary");
+  const commitsTarget = byId("workspace-commits");
+  const warningsTarget = byId("workspace-warnings");
+  try {
+    const workspace = await api("/workspace");
+    summaryTarget.innerHTML = [
+      workspaceFact("Repository", workspace.repo_name),
+      workspaceFact("Branch", workspace.branch || "Not in Git"),
+      workspaceFact("Version", workspace.version || "Not detected"),
+      workspaceFact("Working tree", workspace.status_summary.length ? `${workspace.status_summary.length} change(s)` : "Clean"),
+    ].join("");
+    commitsTarget.innerHTML = workspace.recent_commits.length
+      ? workspace.recent_commits.map((commit) => `<div class="list-item">${escapeHtml(commit)}</div>`).join("")
+      : empty("No recent commits available.");
+    warningsTarget.innerHTML = workspace.warnings.length
+      ? workspace.warnings.map((warning) => `<div class="list-item error-state">${escapeHtml(warning)}</div>`).join("")
+      : empty("No workspace warnings.");
+  } catch (error) {
+    summaryTarget.innerHTML = errorMarkup(error.message);
+    commitsTarget.innerHTML = errorMarkup(error.message);
+    warningsTarget.innerHTML = errorMarkup(error.message);
+  }
+}
+
+function setVoiceState(state, message) {
+  const button = byId("voice-button");
+  const label = byId("voice-label");
+  button.dataset.state = state;
+  button.setAttribute("aria-pressed", state === "listening" ? "true" : "false");
+  button.setAttribute("aria-label", state === "listening" ? "Stop push-to-talk" : "Start push-to-talk");
+  label.textContent = state === "listening" ? "Listening" : state === "sending" ? "Sending" : "Talk";
+  byId("voice-status").textContent = message;
+}
+
+function friendlyRecognitionError(code) {
+  if (code === "not-allowed" || code === "service-not-allowed") {
+    if (!window.isSecureContext) {
+      return "Chrome blocked the mic on this HTTP address. Use the keyboard mic, or open Maya over trusted HTTPS.";
+    }
+    return "Microphone permission is off. You can enable it or keep typing.";
+  }
+  if (code === "audio-capture") return "No microphone is available. You can keep typing.";
+  if (code === "network") return "Voice recognition is unavailable right now. You can keep typing.";
+  return "I didn't catch that. Tap Talk to try again, or type instead.";
+}
+
+function initializeBrowserVoice() {
+  const Recognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+  if (!Recognition) {
+    const button = byId("voice-button");
+    button.dataset.state = "unsupported";
+    button.setAttribute("aria-label", "Voice recognition unavailable; open text input");
+    byId("voice-label").textContent = "Type";
+    byId("voice-status").textContent = "Chrome voice recognition isn't available on this page. Tap Type, then use the keyboard mic or text.";
+    return;
+  }
+
+  recognition = new Recognition();
+  recognition.continuous = false;
+  recognition.interimResults = true;
+  recognition.maxAlternatives = 1;
+  recognition.lang = navigator.language || "en-US";
+  recognition.onstart = () => setVoiceState("listening", "Listening now. Tap again to stop.");
+  recognition.onresult = (event) => {
+    let interim = "";
+    for (let index = event.resultIndex; index < event.results.length; index += 1) {
+      const words = event.results[index][0].transcript.trim();
+      if (event.results[index].isFinal) recognitionFinalText = `${recognitionFinalText} ${words}`.trim();
+      else interim = `${interim} ${words}`.trim();
+    }
+    byId("chat-input").value = [recognitionBaseText, recognitionFinalText, interim].filter(Boolean).join(" ");
+  };
+  recognition.onerror = (event) => {
+    recognitionFailed = true;
+    setVoiceState("idle", friendlyRecognitionError(event.error));
+  };
+  recognition.onend = () => {
+    const transcript = recognitionFinalText.trim();
+    if (transcript && !recognitionFailed) {
+      voiceResponsePending = true;
+      setVoiceState("sending", "Sending your voice message…");
+      byId("chat-form").requestSubmit();
+    } else if (!recognitionFailed) {
+      setVoiceState("idle", "Voice ready");
+    }
+  };
+}
+
+function togglePushToTalk() {
+  if (!recognition) {
+    byId("chat-input").focus();
+    byId("voice-status").textContent = "Use the keyboard microphone for dictation, or type your message.";
+    return;
+  }
+  if (byId("voice-button").dataset.state === "listening") {
+    setVoiceState("sending", "Finishing your voice message…");
+    recognition.stop();
+    return;
+  }
+  if ("speechSynthesis" in window) window.speechSynthesis.cancel();
+  recognitionBaseText = byId("chat-input").value.trim();
+  recognitionFinalText = "";
+  recognitionFailed = false;
+  try {
+    recognition.start();
+  } catch {
+    const guidance = window.isSecureContext
+      ? "Voice couldn't start. Check Chrome's microphone permission, or use the keyboard mic."
+      : "Chrome blocked the mic on this HTTP address. Use the keyboard mic, or open Maya over trusted HTTPS.";
+    setVoiceState("idle", guidance);
+  }
+}
+
+function speakVoiceReply(text) {
+  if (!("speechSynthesis" in window) || !("SpeechSynthesisUtterance" in window)) {
+    byId("voice-status").textContent = "Chrome speech playback isn't available on this device.";
+    return;
+  }
+  window.speechSynthesis.cancel();
+  window.speechSynthesis.resume();
+  const utterance = new SpeechSynthesisUtterance(text);
+  utterance.lang = navigator.language || "en-US";
+  utterance.rate = 1;
+  utterance.onstart = () => { byId("voice-status").textContent = "Maya is speaking…"; };
+  utterance.onend = () => { byId("voice-status").textContent = "Voice reply ready"; };
+  utterance.onerror = () => { byId("voice-status").textContent = "Reply received. Chrome couldn't play the voice; tap the speaker on Maya's message to retry."; };
+  window.speechSynthesis.speak(utterance);
+}
+
+function setPhotoState(state, message = "") {
+  const button = byId("photo-button");
+  const status = byId("photo-status");
+  button.dataset.state = state;
+  byId("photo-label").textContent = state === "analyzing" ? "Looking" : "Photo";
+  status.textContent = message;
+  status.hidden = !message;
+}
+
+async function handlePhotoCapture(event) {
+  const input = event.currentTarget;
+  const file = input.files?.[0];
+  if (!file) {
+    setPhotoState("idle");
+    return;
+  }
+  if (file.size > 10 * 1024 * 1024) {
+    setPhotoState("idle", "That photo is over 10 MB. Choose a smaller image.");
+    input.value = "";
+    return;
+  }
+
+  const promptInput = byId("chat-input");
+  const prompt = promptInput.value.trim() || "What do you notice in this photo?";
+  addChatMessage("user", promptInput.value.trim() ? `Shared a photo: ${promptInput.value.trim()}` : "Shared a photo.");
+  promptInput.value = "";
+  setPhotoState("analyzing", "Analyzing this one photo. No live feed is active.");
+  try {
+    const response = await fetch(`/vision/photo?prompt=${encodeURIComponent(prompt)}`, {
+      method: "POST",
+      headers: { "Content-Type": file.type || "application/octet-stream" },
+      body: file,
+    });
+    const payload = await response.json();
+    if (!response.ok) throw new Error(errorMessage(payload, "Photo analysis failed"));
+    addChatMessage("maya", payload.agent_response.user_response, payload.agent_response.machine_output);
+    if (byId("speak-replies").checked) speakVoiceReply(payload.agent_response.user_response);
+    setPhotoState("idle", "Photo analyzed. The image bytes were not retained.");
+  } catch {
+    addChatMessage("maya", "I couldn't analyze that photo. It was not retained; you can try another image or keep chatting.");
+    setPhotoState("idle", "Photo analysis unavailable. The image was not retained.");
+  } finally {
+    input.value = "";
+  }
+}
+
+function markPhotoPickerOpen() {
+  setPhotoState("selecting", "Camera or photo picker open. No live feed is active.");
+  byId("photo-input").click();
+}
+
+function statusToken(kind, label, value) {
+  return `<span class="status-token ${escapeHtml(kind)}" data-status-source="${escapeHtml(kind)}"><span>${escapeHtml(label)}</span><strong>${escapeHtml(value)}</strong></span>`;
+}
+
+async function loadStatusTokens() {
+  const target = byId("status-tokens");
+  const [contextResult, workspaceResult, usageResult, promotionsResult, proceduresResult] = await Promise.allSettled([
+    api("/context"), api("/workspace"), api("/search/usage"),
+    api("/dream/promotions"), api("/procedures/pending"),
+  ]);
+  const tokens = [];
+  if (contextResult.status === "fulfilled" && Array.isArray(contextResult.value?.priorities)) {
+    tokens.push(statusToken("priorities", "Priorities", contextResult.value.priorities.length));
+  }
+  if (promotionsResult.status === "fulfilled" && proceduresResult.status === "fulfilled"
+      && Array.isArray(promotionsResult.value) && Array.isArray(proceduresResult.value)) {
+    const pendingFacts = promotionsResult.value.filter((item) => item.status === "pending").length;
+    tokens.push(statusToken("approvals", "Pending review", pendingFacts + proceduresResult.value.length));
+  }
+  if (workspaceResult.status === "fulfilled" && Array.isArray(workspaceResult.value?.recent_commits)
+      && workspaceResult.value.recent_commits.length > 0) {
+    const shortHash = String(workspaceResult.value.recent_commits[0]).trim().split(/\s+/)[0];
+    if (shortHash) tokens.push(statusToken("commit", "Commit", shortHash));
+  }
+  if (usageResult.status === "fulfilled" && Number.isFinite(usageResult.value?.count)
+      && Number.isFinite(usageResult.value?.limit)) {
+    tokens.push(statusToken("search", "Search", `${usageResult.value.count}/${usageResult.value.limit}`));
+  }
+  target.innerHTML = tokens.join("");
+  target.hidden = tokens.length === 0;
+}
+
+async function searchWorkspace(event) {
+  event.preventDefault();
+  const query = byId("workspace-search").value.trim();
+  if (!query) return;
+  const target = byId("workspace-search-result");
+  try {
+    await withButton(event.submitter, async () => {
+      const result = await api("/workspace/search", {
+        method: "POST",
+        body: { query, max_results: 20 },
+      });
+      target.innerHTML = result.results.length
+        ? result.results.map((match) => `<div class="list-item">
+            <strong class="item-title">${escapeHtml(match.relative_path)}:${escapeHtml(match.line_number)}</strong>
+            <div>${escapeHtml(match.snippet)}</div>
+          </div>`).join("")
+        : empty("No safe workspace matches.");
+    });
+  } catch (error) {
+    target.innerHTML = errorMarkup(error.message);
   }
 }
 
@@ -497,8 +762,9 @@ async function recallMemory(event) {
   }
 }
 
-const READ_ONLY_LOADERS = {
+const DEVELOPER_LOADERS = {
   context: loadContext,
+  workspace: loadWorkspace,
   state: loadState,
   skills: loadSkills,
   dream: loadDream,
@@ -506,15 +772,43 @@ const READ_ONLY_LOADERS = {
   memory: loadMemory,
 };
 
+const READ_ONLY_LOADERS = { ...DEVELOPER_LOADERS };
+
 async function loadAllReadOnlyPanels() {
-  await Promise.allSettled([loadHealth(), ...Object.values(READ_ONLY_LOADERS).map((loader) => loader())]);
+  await Promise.allSettled(Object.values(DEVELOPER_LOADERS).map((loader) => loader()));
 }
 
-function bindEvents() {
-  byId("chat-form").addEventListener("submit", sendChat);
-  byId("generate-briefing").addEventListener("click", (event) => generateBriefing(event.currentTarget));
+function renderConversationDiagnostics() {
+  const target = byId("conversation-diagnostics");
+  if (!target) return;
+  if (latestMachineOutput) renderJson(target, latestMachineOutput);
+}
+
+function showStandardView(view) {
+  activeStandardView = view;
+  byId("developer-view").hidden = true;
+  byId("conversation-view").hidden = view !== "conversation";
+  byId("briefing-view").hidden = view !== "briefing";
+  document.querySelectorAll("[data-view]").forEach((control) => {
+    const active = control.dataset.view === view;
+    control.classList.toggle("active", active);
+    if (control.matches("button")) control.setAttribute("aria-current", active ? "page" : "false");
+  });
+}
+
+async function openBriefing(generate = false) {
+  if (byId("developer-mode").checked) {
+    byId("developer-mode").checked = false;
+    unmountDeveloperView();
+  }
+  showStandardView("briefing");
+  if (generate && !briefingGenerated) await generateBriefing(byId("generate-briefing"));
+}
+
+function bindDeveloperEvents() {
   byId("context-search-form").addEventListener("submit", searchContext);
   byId("context-remember-form").addEventListener("submit", rememberContext);
+  byId("workspace-search-form").addEventListener("submit", searchWorkspace);
   byId("skill-form").addEventListener("submit", runSkill);
   byId("run-dream").addEventListener("click", (event) => runDream(event.currentTarget));
   byId("procedure-match-form").addEventListener("submit", matchProcedure);
@@ -537,5 +831,77 @@ function bindEvents() {
   });
 }
 
-bindEvents();
-loadAllReadOnlyPanels();
+async function mountDeveloperView() {
+  byId("conversation-view").hidden = true;
+  byId("briefing-view").hidden = true;
+  byId("developer-view").hidden = false;
+  document.querySelectorAll("[data-view]").forEach((control) => {
+    control.classList.remove("active");
+    if (control.matches("button")) control.setAttribute("aria-current", "false");
+  });
+  const root = byId("developer-root");
+  root.replaceChildren(byId("developer-template").content.cloneNode(true));
+  bindDeveloperEvents();
+  renderConversationDiagnostics();
+  await loadAllReadOnlyPanels();
+}
+
+function unmountDeveloperView() {
+  byId("developer-root").replaceChildren();
+  byId("developer-view").hidden = true;
+}
+
+async function toggleDeveloperMode(event) {
+  if (event.currentTarget.checked) {
+    await mountDeveloperView();
+  } else {
+    unmountDeveloperView();
+    showStandardView(activeStandardView);
+  }
+}
+
+function bindPersistentEvents() {
+  byId("chat-form").addEventListener("submit", sendChat);
+  byId("voice-button").addEventListener("click", togglePushToTalk);
+  byId("photo-button").addEventListener("click", markPhotoPickerOpen);
+  byId("photo-input").addEventListener("change", handlePhotoCapture);
+  try {
+    const savedSpeakReplies = window.localStorage.getItem("mayaSpeakReplies");
+    byId("speak-replies").checked = savedSpeakReplies !== "false";
+  } catch {
+    byId("speak-replies").checked = true;
+  }
+  byId("speak-replies").addEventListener("change", (event) => {
+    try { window.localStorage.setItem("mayaSpeakReplies", String(event.currentTarget.checked)); } catch {}
+    if (event.currentTarget.checked) byId("voice-status").textContent = "Maya will speak her replies.";
+    else window.speechSynthesis?.cancel();
+  });
+  window.addEventListener("focus", () => {
+    window.setTimeout(() => {
+      if (byId("photo-button").dataset.state === "selecting" && !byId("photo-input").files?.length) {
+        setPhotoState("idle");
+      }
+    }, 400);
+  });
+  byId("generate-briefing").addEventListener("click", (event) => generateBriefing(event.currentTarget));
+  byId("developer-mode").addEventListener("change", toggleDeveloperMode);
+  document.querySelectorAll("[data-view]").forEach((control) => {
+    control.addEventListener("click", async (event) => {
+      event.preventDefault();
+      const view = event.currentTarget.dataset.view;
+      if (view === "briefing") await openBriefing(true);
+      else {
+        if (byId("developer-mode").checked) {
+          byId("developer-mode").checked = false;
+          unmountDeveloperView();
+        }
+        showStandardView("conversation");
+      }
+    });
+  });
+}
+
+bindPersistentEvents();
+initializeBrowserVoice();
+showStandardView("conversation");
+Promise.allSettled([loadHealth(), loadStatusTokens()]);

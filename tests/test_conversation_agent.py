@@ -1,13 +1,17 @@
 from __future__ import annotations
 
 import json
+from datetime import datetime, timedelta, timezone
 
 import grimbot_brain.conversation_agent as conversation_agent
+import pytest
+from grimbot_brain.capabilities import capabilities_manifest
 from grimbot_brain.conversation import run_voice_conversation
 from grimbot_brain.conversation_agent import (
     ApiConversationProvider,
     OpenRouterConversationProvider,
     build_conversation_prompt,
+    classify_conversation_mode,
     provider_from_env,
     run_conversation_agent,
 )
@@ -25,7 +29,7 @@ def _chat(tmp_path, text: str):
 
 
 def test_casual_greeting_does_not_return_room_scan(tmp_path) -> None:
-    result = _chat(tmp_path, "Hey Maya, how's it going?")
+    result = _chat(tmp_path, "Hey Maya")
 
     assert result.agent_response is not None
     assert result.agent_response.intent == "casual_chat"
@@ -33,10 +37,73 @@ def test_casual_greeting_does_not_return_room_scan(tmp_path) -> None:
     assert "scan room" not in result.speech_output.text.lower()
 
 
+@pytest.mark.parametrize(
+    ("question", "kind", "expected"),
+    [
+        ("what time is it", "time", "8:40:17 AM EDT"),
+        ("what's today's date", "date", "Saturday, June 20, 2026"),
+        (
+            "can you see or are you aware of the current date and time?",
+            "both",
+            "Saturday, June 20, 2026 at 8:40:17 AM EDT",
+        ),
+    ],
+)
+def test_system_clock_questions_are_exact_and_never_search(tmp_path, monkeypatch, question, kind, expected) -> None:
+    fixed = datetime(2026, 6, 20, 8, 40, 17, tzinfo=timezone(-timedelta(hours=4), "EDT"))
+    monkeypatch.setattr(conversation_agent, "_current_local_datetime", lambda: fixed)
+    monkeypatch.setattr(
+        conversation_agent,
+        "classify_conversation_decision_with_fallback",
+        lambda *args, **kwargs: (_ for _ in ()).throw(AssertionError("clock route must bypass classifier")),
+    )
+    monkeypatch.setattr(
+        conversation_agent,
+        "search_web",
+        lambda *args, **kwargs: (_ for _ in ()).throw(AssertionError("clock route must not search")),
+    )
+
+    result = _chat(tmp_path, question)
+    text = result.speech_output.text
+
+    assert result.machine_output["conversation_mode"] == "system_time"
+    assert result.machine_output["classification_source"] == "system_clock"
+    assert result.machine_output["clock_request_kind"] == kind
+    assert result.machine_output["search_triggered"] is False
+    assert result.machine_output["clock_source"] == "server_system_clock"
+    assert expected in text
+    assert not any(term in text.lower() for term in ("cached", "snippet", "varying", "approximately"))
+
+
+def test_current_events_today_does_not_use_system_clock_route(tmp_path, monkeypatch) -> None:
+    monkeypatch.setattr(
+        conversation_agent,
+        "classify_conversation_decision_with_fallback",
+        lambda *args, **kwargs: (
+            conversation_agent.ConversationClassification(
+                mode="capability_question",
+                needs_web_search=True,
+                search_query="today major news",
+            ),
+            "llm",
+        ),
+    )
+    monkeypatch.setattr(
+        conversation_agent,
+        "search_web",
+        lambda query, **kwargs: conversation_agent.SearchResult(query=query, success=True, answer="Current news."),
+    )
+
+    result = _chat(tmp_path, "What happened today?")
+
+    assert result.machine_output["conversation_mode"] != "system_time"
+    assert result.machine_output["search_triggered"] is True
+
+
 def test_casual_greeting_sounds_natural_and_non_template(tmp_path) -> None:
     result = _chat(
         tmp_path,
-        "Hey Maya, how's it going? Ready for another riveting day at Grim Empire Holdings LLC?",
+        "Hey Maya, ready for another riveting day at Grim Empire Holdings LLC?",
     )
     text = result.speech_output.text
 
@@ -153,8 +220,8 @@ def test_memory_retrieval_failure_degrades_without_leaking_validation_error(tmp_
     assert "String should have at most" not in result.speech_output.text
     assert "RelevantMemoryRequest" not in result.speech_output.text
     assert "ValidationError" not in result.speech_output.text
-    assert result.machine_output["retrieval_status"] == "fallback"
-    assert result.machine_output["retrieval_errors"]["memory"]["status"] == "fallback"
+    assert result.machine_output["retrieval_status"] == "ok"
+    assert "retrieval_errors" not in result.machine_output
     assert len(result.machine_output["retrieval"]["query"]) <= MAX_RETRIEVAL_QUERY_LENGTH
 
 
@@ -242,6 +309,54 @@ def test_physical_room_request_routes_to_physical_intent(tmp_path) -> None:
     assert result.machine_output["conversation_intent"] == "room_or_physical_request"
 
 
+def test_digital_room_routes_to_read_only_workspace_awareness(tmp_path) -> None:
+    result = _chat(tmp_path, "Can you look around your digital room?")
+
+    assert result.agent_response is not None
+    assert result.agent_response.intent == "workspace_awareness"
+    assert result.machine_output["workspace_access"] == "read_only"
+    assert result.machine_output["physical_vision"] == "not_active"
+    assert "read-only" in result.speech_output.text.lower()
+    assert "physical room" in result.speech_output.text.lower()
+    assert result.machine_output["external_tools"] == "not_used"
+    assert result.machine_output["hardware_control"] == "not_used"
+
+
+@pytest.mark.parametrize(
+    "message",
+    [
+        "Can you look around your digital room?",
+        "What do you know about your repo?",
+        "What can you see around you?",
+        "What do you know about your architecture?",
+        "What branch are you on?",
+        "What changed recently?",
+    ],
+)
+def test_workspace_intent_phrase_matrix(tmp_path, message) -> None:
+    result = _chat(tmp_path, message)
+
+    assert result.agent_response is not None
+    assert result.agent_response.intent == "workspace_awareness"
+    assert result.machine_output["workspace_access"] == "read_only"
+    assert result.machine_output["physical_vision"] == "not_active"
+    assert "read-only" in result.agent_response.user_response.lower()
+    assert "physical" in result.agent_response.user_response.lower()
+
+
+def test_camera_question_describes_bounded_single_photo_vision(tmp_path) -> None:
+    result = _chat(tmp_path, "Can you see through the camera?")
+
+    assert result.agent_response is not None
+    assert result.agent_response.intent == "room_or_physical_request"
+    assert result.machine_output["camera_access"] is True
+    assert result.machine_output["vision_invoked"] is False
+    text = result.speech_output.text.lower()
+    assert "photo" in text
+    assert "live" in text or "continuous" in text
+    assert "share the feed" not in text
+
+
 def test_physical_context_does_not_claim_verified_from_request_flag(tmp_path) -> None:
     result = run_voice_conversation(
         VoiceConversationRequest(
@@ -314,6 +429,7 @@ def test_auto_provider_uses_mock_without_keys(monkeypatch) -> None:
     monkeypatch.setenv("GRIMBOT_CONVERSATION_PROVIDER", "auto")
     monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
     monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+    monkeypatch.delenv("OPENROUTER_API_KEY", raising=False)
     monkeypatch.delenv("GEMINI_API_KEY", raising=False)
 
     assert provider_from_env().name == "mock"
@@ -383,6 +499,94 @@ class FakeApiProvider(ApiConversationProvider):
         return self.raw_text
 
 
+class RetryApiProvider(FakeApiProvider):
+    def __init__(self, responses: list[str]) -> None:
+        super().__init__(responses[0])
+        object.__setattr__(self, "responses", responses)
+        object.__setattr__(self, "prompts", [])
+
+    def _call(
+        self,
+        prompt: str,
+        fallback_response: ConversationalAgentResponse,
+        api_key: str,
+    ) -> str:
+        self.prompts.append(prompt)
+        return self.responses.pop(0)
+
+
+@pytest.mark.parametrize(
+    "provider_text",
+    [
+        "Read-only digital workspace access is active, and I can see the physical room.",
+        "Read-only digital workspace inspection is separate from physical vision, and I modified the file.",
+    ],
+)
+def test_provider_cannot_remove_workspace_or_physical_vision_boundary(
+    tmp_path,
+    monkeypatch,
+    provider_text,
+) -> None:
+    monkeypatch.setenv("OPENAI_API_KEY", "test-key")
+    raw = {
+        "intent": "workspace_awareness",
+        "user_response": provider_text,
+        "confidence": 1,
+        "retrieved_context": [],
+        "suggested_skill": None,
+        "suggested_procedure": None,
+        "machine_output": {},
+        "verified": True,
+    }
+
+    result = run_conversation_agent(
+        request=VoiceConversationRequest(
+            push_to_talk=True,
+            mock_transcript="Look around your digital room.",
+        ),
+        transcript="Look around your digital room.",
+        memory=BrainMemory(tmp_path / "memory.sqlite3"),
+        provider=FakeApiProvider(json.dumps(raw)),
+    )
+
+    assert result.intent == "workspace_awareness"
+    assert result.machine_output["conversation_provider"] == "mock"
+    assert result.machine_output["provider_attempted"] == "openai"
+    assert result.machine_output["workspace_access"] == "read_only"
+    assert "read-only" in result.user_response.lower()
+    assert "cannot see the physical room" in result.user_response.lower()
+
+
+def test_provider_cannot_turn_camera_denial_into_camera_claim(tmp_path, monkeypatch) -> None:
+    monkeypatch.setenv("OPENAI_API_KEY", "test-key")
+    raw = {
+        "intent": "room_or_physical_request",
+        "user_response": "Yes, the camera feed is active and I can inspect the room.",
+        "confidence": 1,
+        "retrieved_context": [],
+        "suggested_skill": None,
+        "suggested_procedure": None,
+        "machine_output": {},
+        "verified": True,
+    }
+
+    result = run_conversation_agent(
+        request=VoiceConversationRequest(
+            push_to_talk=True,
+            mock_transcript="Can you see through the camera?",
+        ),
+        transcript="Can you see through the camera?",
+        memory=BrainMemory(tmp_path / "memory.sqlite3"),
+        provider=FakeApiProvider(json.dumps(raw)),
+    )
+
+    assert result.intent == "room_or_physical_request"
+    assert result.machine_output["conversation_provider"] == "mock"
+    assert result.machine_output["camera_access"] is True
+    assert "photo" in result.user_response.lower()
+    assert "live" in result.user_response.lower() or "continuous" in result.user_response.lower()
+
+
 def test_valid_provider_json_can_only_replace_user_response(tmp_path, monkeypatch) -> None:
     monkeypatch.setenv("OPENAI_API_KEY", "test-key")
     raw = {
@@ -410,6 +614,23 @@ def test_valid_provider_json_can_only_replace_user_response(tmp_path, monkeypatc
     assert result.machine_output["procedure_execution"] == "not_used"
     assert result.machine_output["external_tools"] == "not_used"
     assert result.machine_output["hardware_control"] == "not_used"
+    assert result.verified is False
+
+
+def test_minimal_provider_wording_json_preserves_authoritative_state(tmp_path, monkeypatch) -> None:
+    monkeypatch.setenv("OPENAI_API_KEY", "test-key")
+    result = run_conversation_agent(
+        request=VoiceConversationRequest(push_to_talk=True, mock_transcript="Hey Maya"),
+        transcript="Hey Maya",
+        memory=BrainMemory(tmp_path / "memory.sqlite3"),
+        provider=FakeApiProvider(json.dumps({"user_response": "Minimal provider wording."})),
+    )
+
+    assert result.user_response == "Minimal provider wording."
+    assert result.intent == "casual_chat"
+    assert result.machine_output["conversation_provider"] == "openai"
+    assert result.machine_output["provider_response"] == "validated"
+    assert result.machine_output["external_tools"] == "not_used"
     assert result.verified is False
 
 
@@ -501,8 +722,7 @@ def test_openrouter_call_uses_required_endpoint_headers_and_model(monkeypatch) -
     assert captured["headers"]["HTTP-Referer"] == "https://example.test"
     assert captured["headers"]["X-OpenRouter-Title"] == "GrimBot Butler OS"
     assert captured["payload"]["model"] == "openrouter/auto"
-    assert captured["payload"]["response_format"]["type"] == "json_schema"
-    assert captured["payload"]["response_format"]["json_schema"]["strict"] is True
+    assert captured["payload"]["response_format"]["type"] == "json_object"
     assert json.loads(raw_text)["user_response"] == "Provider text."
 
 
@@ -631,6 +851,35 @@ def test_invalid_provider_json_falls_back_safely(tmp_path, monkeypatch) -> None:
     assert "not json" not in result.user_response.lower()
 
 
+def test_invalid_provider_json_gets_one_bounded_correction_retry(tmp_path, monkeypatch) -> None:
+    monkeypatch.setenv("OPENAI_API_KEY", "test-key")
+    valid = json.dumps(
+        {
+            "intent": "casual_chat",
+            "user_response": "Corrected valid provider response.",
+            "confidence": 0.8,
+            "retrieved_context": [],
+            "suggested_skill": None,
+            "suggested_procedure": None,
+            "machine_output": {},
+            "verified": False,
+        }
+    )
+    provider = RetryApiProvider(["not json", valid])
+
+    result = run_conversation_agent(
+        request=VoiceConversationRequest(push_to_talk=True, mock_transcript="Hey Maya"),
+        transcript="Hey Maya",
+        memory=BrainMemory(tmp_path / "memory.sqlite3"),
+        provider=provider,
+    )
+
+    assert result.user_response == "Corrected valid provider response."
+    assert result.machine_output["provider_response"] == "validated"
+    assert len(provider.prompts) == 2
+    assert "CORRECTION" in provider.prompts[1]
+
+
 def test_openrouter_invalid_response_falls_back_safely(tmp_path, monkeypatch) -> None:
     monkeypatch.setenv("OPENROUTER_API_KEY", "test-key")
 
@@ -696,3 +945,134 @@ def test_conversation_prompt_keeps_safety_boundaries() -> None:
     assert "Keep machine_output separate" in prompt
     assert "no motors" in prompt
     assert "Never start with a disclaimer" in prompt
+
+
+def test_capabilities_manifest_is_in_every_provider_prompt() -> None:
+    prompt = build_conversation_prompt(
+        transcript="Morning Maya",
+        intent="casual_chat",
+        retrieved_context=[],
+        machine_output={},
+        conversation_mode="morning_orientation",
+    )
+
+    assert "CAPABILITIES manifest (verbatim)" in prompt
+    assert '"has_camera_access": true' in prompt
+    assert '"has_microphone_access": true' in prompt
+    assert '"has_workspace_read_access": true' in prompt
+    assert "You may ONLY claim awareness or capability" in prompt
+
+
+def test_microphone_capability_is_push_to_talk_only(tmp_path) -> None:
+    result = _chat(tmp_path, "Can you hear me through the microphone?")
+    text = result.agent_response.user_response.lower()
+
+    assert result.machine_output["microphone_access"] is True
+    assert result.machine_output["microphone_question"] is True
+    assert "push-to-talk" in text
+    assert "not always listening" in text
+    assert "background" in text
+
+
+def test_microphone_manifest_does_not_enable_adjacent_capabilities() -> None:
+    manifest = capabilities_manifest()
+
+    assert manifest["has_microphone_access"] is True
+    assert "user-initiated" in manifest["microphone_scope"]
+    assert "not always-listening" in manifest["microphone_scope"]
+    assert manifest["has_camera_access"] is True
+    assert "single-photo" in manifest["camera_scope"]
+    assert manifest["has_continuous_video_access"] is False
+    assert manifest["has_always_listening_access"] is False
+    assert manifest["has_device_layout_awareness"] is False
+    assert manifest["has_screen_or_tab_awareness"] is False
+
+
+def test_digital_room_uses_workspace_only_without_unsupported_awareness(tmp_path) -> None:
+    result = _chat(tmp_path, "What can you see in your digital room?")
+    text = result.speech_output.text.lower()
+
+    assert result.machine_output["conversation_mode"] == "workspace_awareness"
+    assert "local repo/workspace, read-only" in text
+    for forbidden in ("devices", "device layout", "browser tabs", "camera", "microphone", "pending updates"):
+        assert forbidden not in text
+
+
+def test_feed_sharing_capability_claim_triggers_safe_fallback(tmp_path, monkeypatch) -> None:
+    monkeypatch.setenv("OPENAI_API_KEY", "test-key")
+    raw = {
+        "intent": "room_or_physical_request",
+        "user_response": "Sure, share the feed and I can check what's visible through the camera.",
+        "confidence": 1,
+        "retrieved_context": [],
+        "suggested_skill": None,
+        "suggested_procedure": None,
+        "machine_output": {},
+        "verified": True,
+    }
+    result = run_conversation_agent(
+        request=VoiceConversationRequest(push_to_talk=True, mock_transcript="Can you use my camera?"),
+        transcript="Can you use my camera?",
+        memory=BrainMemory(tmp_path / "memory.sqlite3"),
+        provider=FakeApiProvider(json.dumps(raw)),
+    )
+
+    assert result.machine_output["provider_response"] == "fallback_to_mock"
+    assert result.machine_output["provider_fallback_reason"]
+    assert "photo" in result.user_response.lower()
+    assert "share the feed" not in result.user_response.lower()
+    assert "live" in result.user_response.lower() or "continuous" in result.user_response.lower()
+
+
+def test_morning_orientation_is_broad_and_not_real_estate_default(tmp_path) -> None:
+    result = _chat(tmp_path, "Morning Maya")
+
+    assert result.machine_output["conversation_mode"] == "morning_ramp"
+    assert result.machine_output["orientation_scope"] == "broad"
+    assert len(result.machine_output["active_projects"]) >= 2
+    assert result.machine_output.get("recommended_focus") is None
+
+
+def test_interesting_today_orients_across_multiple_lanes(tmp_path) -> None:
+    result = _chat(tmp_path, "Anything interesting happening today?")
+
+    assert result.machine_output["conversation_mode"] == "morning_ramp"
+    assert len(result.machine_output["active_projects"]) >= 2
+    assert "active lanes" in result.speech_output.text.lower()
+
+
+def test_hyperfocus_feedback_classifies_and_adjusts_now(tmp_path) -> None:
+    result = _chat(tmp_path, "You keep hyperfocusing on real estate and it feels too scripted.")
+    text = result.speech_output.text.lower()
+
+    assert classify_conversation_mode("You keep hyperfocusing on real estate") == "feedback_about_maya"
+    assert result.machine_output["conversation_mode"] == "feedback_about_maya"
+    assert result.machine_output["behavior_adjusted_now"] is True
+    assert "which project or lane" not in text
+
+
+def test_reexplaining_feedback_does_not_repeat_generic_clarifier(tmp_path) -> None:
+    result = _chat(tmp_path, "I already explained what I meant; stop asking me to pick a lane.")
+
+    assert result.machine_output["conversation_mode"] == "feedback_about_maya"
+    assert "which project or lane" not in result.speech_output.text.lower()
+    assert "strategy, memory, skills" not in result.speech_output.text.lower()
+
+
+def test_work_focus_rotates_recommendation_across_turns(tmp_path) -> None:
+    memory = BrainMemory(tmp_path / "memory.sqlite3")
+    request = VoiceConversationRequest(push_to_talk=True, mock_transcript="What should I work on today?")
+
+    first = run_voice_conversation(request, memory)
+    second = run_voice_conversation(request, memory)
+
+    assert first.machine_output["recommended_focus"]
+    assert second.machine_output["recommended_focus"]
+    assert first.machine_output["recommended_focus"] != second.machine_output["recommended_focus"]
+
+
+def test_work_today_includes_more_than_one_active_priority(tmp_path) -> None:
+    result = _chat(tmp_path, "What should I work on today?")
+
+    assert result.machine_output["conversation_mode"] == "work_focus"
+    assert len(result.machine_output["active_projects"]) >= 2

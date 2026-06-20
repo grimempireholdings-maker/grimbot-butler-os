@@ -21,6 +21,7 @@ from .schemas import (
     SkillRunRequest,
     SkillRunResult,
 )
+from .web_search import search_web
 
 PERMISSION_ORDER: dict[PermissionLevel, int] = {
     "observe": 0,
@@ -258,6 +259,36 @@ class TaskBreakdownSkill(Skill):
         return {"task": task, "steps": steps, "next_best_action": steps[0]}
 
 
+class WebSearchSkill(Skill):
+    name = "web_search"
+    description = "Run one bounded, read-only Tavily search and return snippets without following links."
+    category: SkillCategory = "research"
+    required_permission: PermissionLevel = "observe"
+    inputs_schema = {"query": "string", "max_results": "optional integer from 1 to 10"}
+    outputs_schema = {
+        "success": "bool",
+        "results": "list of title/url/snippet objects",
+        "answer": "optional string",
+        "reason": "optional string",
+        "cached": "bool",
+    }
+
+    def execute(self, inputs: dict[str, Any], memory: BrainMemory) -> dict[str, Any]:
+        query = _text(inputs.get("query"), "")
+        try:
+            max_results = int(inputs.get("max_results", 5))
+        except (TypeError, ValueError):
+            max_results = 5
+        result = search_web(query, max_results=max_results, memory=memory)
+        payload = result.model_dump()
+        payload["next_best_action"] = (
+            "review the returned sources"
+            if result.success
+            else "check search configuration or try again later"
+        )
+        return payload
+
+
 def create_default_registry(memory: BrainMemory, adaptive_state: AdaptiveState | None = None) -> SkillRegistry:
     registry = SkillRegistry(memory, adaptive_state)
     registry.register(RoomCleanupPlanSkill())
@@ -265,6 +296,7 @@ def create_default_registry(memory: BrainMemory, adaptive_state: AdaptiveState |
     registry.register(MemoryReviewSkill())
     registry.register(MayaBriefingSkill())
     registry.register(TaskBreakdownSkill())
+    registry.register(WebSearchSkill())
     return registry
 
 

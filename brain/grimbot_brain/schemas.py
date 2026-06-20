@@ -14,7 +14,7 @@ AssistantMode = Literal["maya_chief_of_staff", "neutral_robot", "quiet_observer"
 PermissionLevel = Literal["observe", "suggest", "ask_approval", "execute"]
 MayaResponseMode = Literal["default", "cleanup_coaching"]
 VoiceMode = Literal["mock", "local"]
-SkillCategory = Literal["planning", "memory", "briefing", "productivity"]
+SkillCategory = Literal["planning", "memory", "briefing", "productivity", "research"]
 StateSignalName = Literal[
     "attention",
     "urgency",
@@ -212,7 +212,7 @@ class MayaComposedResponse(BaseModel):
     verified: bool
     directives_applied: list[str] = Field(max_length=10)
     machine_output: dict
-    user_response: str = Field(min_length=1, max_length=2000)
+    user_response: str = Field(min_length=1, max_length=4000)
 
 
 class MayaBriefingRequest(BaseModel):
@@ -251,6 +251,7 @@ class VoiceConversationRequest(BaseModel):
     assistant_mode: AssistantMode = "maya_chief_of_staff"
     response_mode: MayaResponseMode = "default"
     verified: bool = False
+    ambient_mode: bool = True
 
 
 class SpeechToTextResult(BaseModel):
@@ -278,6 +279,23 @@ class VoiceConversationResponse(BaseModel):
     maya_response: MayaComposedResponse
     speech_output: TextToSpeechResult
     machine_output: dict
+
+
+class PhotoAnalysisResult(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    description: str = Field(min_length=1, max_length=4000)
+    mode: Literal["gemini"] = "gemini"
+    model: str = Field(min_length=1, max_length=160)
+    media_type: str = Field(min_length=1, max_length=80)
+    raw_media_stored: bool = False
+
+
+class PhotoConversationResponse(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    analysis: PhotoAnalysisResult
+    agent_response: ConversationalAgentResponse
 
 
 class SkillInfo(BaseModel):

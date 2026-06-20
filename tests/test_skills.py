@@ -30,6 +30,16 @@ def test_skill_lookup_by_name_and_category(tmp_path) -> None:
     assert "room_cleanup_plan" in [item.name for item in planning]
 
 
+def test_web_search_skill_is_registered_as_observe_only_research(tmp_path) -> None:
+    registry = create_default_registry(BrainMemory(tmp_path / "memory.sqlite3"))
+
+    skill = registry.get("web_search")
+
+    assert skill is not None
+    assert skill.info().category == "research"
+    assert skill.info().required_permission == "observe"
+
+
 def test_permission_gating_blocks_higher_permission_skill(tmp_path) -> None:
     registry = create_default_registry(BrainMemory(tmp_path / "memory.sqlite3"))
 

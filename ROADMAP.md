@@ -1,5 +1,47 @@
 # Roadmap
 
+## v0.13.0 - User-Initiated Voice and Single-Photo Vision
+
+- Real browser push-to-talk with runtime fallback to text
+- Browser speech synthesis for voice-originated replies
+- One user-selected mobile photo analyzed by real Gemini 2.5 Flash Lite
+- Description-only episodic memory with guaranteed temporary-image deletion
+- Precisely scoped microphone/camera capability honesty; no ambient sensing
+
+## v0.12.0 - Three-Mode Maya Console
+
+- [x] Make Conversation the default, minimal console surface.
+- [x] Move Briefing into an explicit on-demand view.
+- [x] Dynamically mount and remove all dense Developer panels.
+- [x] Add real-data-only status tokens with omission on unavailable data.
+- [x] Preserve Ambient Mode, persona selection, diagnostics, reviews, and safety boundaries.
+- [x] Verify the conversation surface at phone width over the existing local FastAPI stack.
+
+## v0.11.0 - Ambient Companion Mode
+
+- [x] Extend the paired-history LLM classifier with six ambient conversation modes.
+- [x] Assemble priorities, approvals, recent commits, recent memories, time, and tone guidance read-only.
+- [x] Keep architecture and search mechanics subconscious in ordinary conversation.
+- [x] Add Ambient Mode to Maya Console, on by default, while preserving Developer Mode diagnostics.
+- [x] Permit one cached proactive weather lookup on `morning_ramp`; prohibit proactive news and all other new autonomous triggers.
+- [x] Add deterministic coverage and an opt-in `GRIMBOT_LIVE_TESTS=1` real-provider regression suite.
+
+## v0.10.8 - Classifier-Authorized Web Search
+
+- [x] Extend the LLM classification result with `needs_web_search` and a concise query.
+- [x] Add bounded Tavily snippet search with a five-second timeout and one-hour cache.
+- [x] Log search usage to episodic memory for review and dreaming.
+- [x] Inject results into deterministic machine output before provider response generation.
+- [x] Preserve honest failure behavior and prohibit arbitrary browsing, scraping, link following, and result execution.
+
+## v0.10.5 - Capability Honesty and Conversation Modes
+
+- [x] Add an immutable runtime capability manifest to every provider prompt.
+- [x] Reject unsupported camera, screen, tab, device-layout, microphone, and physical-awareness claims.
+- [x] Classify conversation mode before memory/context retrieval.
+- [x] Keep casual and capability conversations free of unrelated business context.
+- [x] Add broad morning orientation, feedback correction, and rotating work-focus recommendations.
+
 ## Phase 0
 
 - [x] Brain Skeleton
@@ -63,6 +105,8 @@
 - [x] Context Search and Recall
 - [x] Conversational Maya Agent
 - [x] Natural Intent Routing
+- [x] Read-Only Workspace Awareness
+- [x] Console Developer Mode
 
 ## Phase 11
 
@@ -83,3 +127,9 @@
 ## Later
 
 - [ ] Humanoid Platform
+## v0.13.3 - Authoritative Location and System Clock
+
+- Verified Lima, Ohio profile location grounds local weather/news queries
+- Removed silent Dayton/environment location fallback
+- Bare date/time questions bypass LLM classification and web search
+- Exact timezone-aware server clock response with no provider hedging

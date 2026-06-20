@@ -20,6 +20,11 @@ Create a safe, affordable personal robotic assistant capable of perception, memo
 - [x] Maya Console
 - [x] Chief of Staff Context
 - [x] Conversational Maya Agent
+- [x] Read-Only Workspace Awareness
+- [x] Classifier-Authorized Web Search
+- [x] Ambient Companion Mode
+- [x] Three-Mode Maya Console
+- [x] Real Browser Voice and Single-Photo Vision
 - [ ] External Tool Use
 - [ ] Rover Platform
 - [ ] Object Manipulation
@@ -52,12 +57,36 @@ Phase 10 adds Maya Chief of Staff Context v0.10.1: structured personal and busin
 
 Phase 10.2 adds Conversational Maya Agent v0.10.2: deterministic intent routing, natural Maya responses, provider hooks, and console chat integration without defaulting to room scans.
 
+Phase 10.4 adds Maya Workspace Awareness: bounded read-only inspection of the active repository, branch, status, recent commits, documentation, version, and safe project text search. Version `0.10.3` remains the existing OpenRouter provider release, so workspace awareness advances to `0.10.4` rather than reusing that tag.
+
+Phase 10.5 adds capability honesty and conversation modes. A hardcoded capability manifest is included in every provider prompt, unsupported awareness claims are rejected after generation, and casual, morning, feedback, work-focus, workspace, physical, and capability conversations retrieve only mode-appropriate context. Maya no longer treats Real Estate Acquisitions as the universal fallback.
+
+Phase 10.8 adds Maya's first bounded external-world capability: classifier-authorized Tavily web search. Search is read-only snippet retrieval with a five-second timeout, one-hour cache, episodic usage logging, structured machine output, and honest failure behavior. It does not browse pages, scrape arbitrary URLs, follow links, or execute result content.
+
+Phase 11 adds Ambient Companion Mode v0.11.0. Six new modes flow through the existing paired-history LLM classifier, daily orientation assembles read-only context behind the scenes, and ordinary wording is protected from internal/debug vocabulary. Ambient Mode is on by default in Maya Console; Developer Mode remains the explicit place for architecture and search diagnostics. A morning greeting may perform one cached weather lookup. This is the only autonomous, non-question-triggered search; proactive news is not enabled.
+
+Phase 12 adds the Three-Mode Maya Console v0.12.0. Conversation is the default and contains only live status tokens, chat, Ambient Mode, persona, and send controls. Briefing is generated only after an explicit request. Developer Mode dynamically mounts the full context, workspace, state, skill, dreaming, procedure, memory, and conversation-diagnostic panels, then removes them from the live DOM when disabled. The console remains a local FastAPI-served static application with no frontend build step.
+
+Phase 13 adds real, user-initiated sensory input in v0.13.0. Maya Console push-to-talk uses the browser Web Speech API and speaks voice-originated replies with SpeechSynthesis. A mobile capture control submits exactly one selected photo to Gemini 2.5 Flash Lite for a conversational response. Neither capability is ambient: there is no background audio, live camera feed, continuous video, or persistent raw-media library.
+
+v0.13.3 makes local context and system time authoritative. Julian's verified primary location is stored in Chief of Staff profile context as Lima, Ohio and grounds implicit local weather/news queries; no city is inferred from IP or a hardcoded fallback. Bare date/time questions bypass the conversation classifier and web search, returning the timezone-aware server clock directly.
+
+Maya Console is designed for phone and desktop use over a trusted local network or private Tailscale connection. It is not deployed publicly and should not be exposed directly to the public internet.
+
 LLM output is never connected directly to motors. Every movement command must pass through `brain/grimbot_brain/safety.py`.
 
 By default, local cycle logs are stored at `memory/grimbot_brain.sqlite3`.
-Approved room-scan images are stored under `vision/images` by default. The API does not accept arbitrary file uploads.
+Approved room-scan images are stored under `vision/images` by default. User photo uploads are validated, analyzed from a temporary file, and deleted in all outcomes; episodic memory retains only the description and context.
 
 ## Setup
+
+Create a free Tavily API key at [tavily.com](https://tavily.com), copy `.env.example` to `.env`, and set:
+
+```env
+TAVILY_API_KEY=your_key_here
+```
+
+Without this key, classifier-authorized searches fail closed and Maya states that live search did not return rather than fabricating current information.
 
 ```powershell
 python -m venv .venv
@@ -65,14 +94,14 @@ python -m venv .venv
 pip install -e ".[dev]"
 ```
 
-To enable Gemini perception:
+To enable direct Gemini perception and single-photo analysis:
 
 ```powershell
 pip install -e ".[gemini,dev]"
 copy .env.example .env
 ```
 
-Then set `GEMINI_API_KEY` and `GRIMBOT_MOCK_PERCEPTION=false` in `.env`.
+Then set `GEMINI_API_KEY` and `GRIMBOT_MOCK_PERCEPTION=false` in `.env`. Single-photo analysis can instead reuse an existing `OPENROUTER_API_KEY`; it remains pinned to the real `google/gemini-2.5-flash-lite` model through `OPENROUTER_VISION_MODEL` and never falls back to a mock description.
 
 To enable real webcam capture:
 
@@ -80,7 +109,7 @@ To enable real webcam capture:
 pip install -e ".[vision]"
 ```
 
-Voice I/O works in mock mode by default and does not require microphone hardware.
+The CLI voice path remains mockable. Maya Console uses browser-native push-to-talk and speech synthesis with no cloud voice key.
 
 ## Run Brain Server
 
@@ -108,11 +137,34 @@ Open:
 http://127.0.0.1:8000/console
 ```
 
-The console loads state, skills, dream facts, procedure records, and robot memory through read-only requests. Chat, briefings, skill runs, dream cycles, review decisions, procedure matching, and memory recall occur only after an explicit operator action.
+The console initially loads Conversation Mode only. Briefing is explicit, and Chief of Staff context, workspace awareness, adaptive state, skills, dreaming, procedural memory, robot memory, and diagnostics are absent from the live DOM until Developer Mode is enabled. Chat, photo capture, briefings, skill runs, dream cycles, review decisions, procedure matching, workspace search, and memory recall occur only after an explicit operator action.
 
-The console does not add autonomous execution, procedure execution, motors, hardware control, external tools, or automatic approval. Skill permissions and all existing safety boundaries remain authoritative.
+The console does not add autonomous execution, procedure execution, motors, hardware control, or automatic approval. Conversation may perform only classifier-authorized, read-only Tavily snippet search; skill permissions and all other safety boundaries remain authoritative.
 
 Console chat uses the v0.10.2 conversational Maya agent. Casual chat stays conversational, day/planning questions route to Chief of Staff briefing, named-project questions use context recall, and room scanning appears only for explicit physical, cleaning, vision, hazard, sensor, or robot requests.
+
+## Workspace Awareness
+
+Maya can inspect the local project without modifying it:
+
+```text
+GET /workspace
+GET /workspace/docs
+POST /workspace/search
+```
+
+Workspace inspection reports the current repository root and name, branch, short status, last five commits, detected version, safe top-level items, documentation files, and warnings. Search is literal text matching across a bounded set of small text files. It skips `.git`, virtual environments, `node_modules`, caches, SQLite databases, `.env` files, binary files, large files, secret-looking filenames, and symlink escapes. Git inspection disables optional locks, and likely API-key patterns are redacted from returned text.
+
+Only these Git commands are available to workspace inspection, always with `shell=False` and a timeout:
+
+```text
+git rev-parse --show-toplevel
+git branch --show-current
+git status --short
+git log --oneline -5
+```
+
+Workspace awareness is digital, local, and read-only. It remains separate from web search and is not physical camera vision, command execution, or file editing.
 
 ## Run CLI Demo
 
@@ -237,13 +289,23 @@ Maya never overrides `safety.py` and never presents unverified information as ve
 
 ## Voice I/O
 
-Voice is push-to-talk only.
+Maya Console voice is push-to-talk only. Tapping the microphone begins one browser `SpeechRecognition` session; tapping again stops it. A final transcript uses the existing `/voice/conversation` endpoint, and only replies originating from that voice action are read with browser `SpeechSynthesis`.
+
+Chrome exposes Web Speech recognition through `SpeechRecognition` or its prefixed form. Safari has supported Web Speech recognition since Safari 14.1, but actual availability, permissions, and whether recognition uses an online service remain browser/OS dependent. The console feature-detects at runtime: unsupported or denied recognition leaves text chat fully usable and shows a friendly status rather than a raw browser error. Test the actual phone/browser combination; private-network microphone access may require a secure Tailscale HTTPS URL rather than plain LAN HTTP.
 
 - No always-listening mode
 - No wake word
 - No autonomous action trigger
 - No motors
 - No external agentic tools
+
+Cloud TTS such as ElevenLabs or OpenAI TTS is a future quality decision, not part of v0.13.0.
+
+## Single-Photo Vision
+
+The Conversation view uses the mobile-native pattern `<input type="file" accept="image/*" capture="environment">`. The user explicitly opens the picker/camera and submits one image to `POST /vision/photo`. The server validates type, size, and signature; writes only a temporary approved file; calls real Gemini; logs the resulting description and conversational context; and deletes the bytes in a `finally` block. There is no `getUserMedia`, live preview, continuous video, background capture, or silent camera activation.
+
+Configure either `GEMINI_API_KEY` for Google AI directly or `OPENROUTER_API_KEY` for the pinned Google Gemini model. Camera permission and picker behavior are controlled by the phone browser. If analysis fails, Maya reports a friendly failure and does not invent a visual description.
 
 Voice endpoint:
 
@@ -307,9 +369,9 @@ OpenRouter uses `OPENROUTER_MODEL`, defaulting to `openrouter/auto`, and may inc
 
 Or use `GRIMBOT_CONVERSATION_PROVIDER=auto` to prefer Claude, then OpenAI, then OpenRouter, then Gemini when keys exist. The default remains `mock`, even if API keys are present.
 
-LLM conversation output must validate as the existing `agent_response` JSON schema. If validation fails, Maya falls back to the deterministic mock response. Even valid provider output can only replace `user_response`; intent, machine output, verification state, skill/procedure suggestions, and safety metadata remain controlled by GrimBot.
+LLM conversation wording uses a minimal JSON envelope containing only `user_response`. Legacy full-shape responses remain accepted for compatibility, but provider output can never replace intent, machine output, verification state, skill/procedure suggestions, or safety metadata. Malformed JSON receives one bounded correction retry before Maya falls back to deterministic wording.
 
-Maya may suggest skills, procedures, searches, reviews, and next actions. She may not execute procedures, call external tools, control hardware, approve changes, or override `safety.py`.
+Maya may suggest skills, procedures, reviews, and next actions. The only implemented external call is classifier-authorized Tavily snippet search; she may not execute procedures, follow search links, call arbitrary external tools, control hardware, approve changes, or override `safety.py`.
 
 ## Skills Registry
 
